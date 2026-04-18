@@ -10,10 +10,15 @@ import argparse
 import base64
 import io
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
+# Add SAM-Med2D to path so `segment_anything` can be imported without install
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "SAM-Med2D"))
+
 import cv2
+import httpx
 import numpy as np
 import pandas as pd
 import torch
@@ -265,6 +270,15 @@ class ReportRequest(BaseModel):
     triage: Optional[dict] = None
 
 
+class AnalyzeUrlRequest(BaseModel):
+    image_url: str              # full URL to the X-ray image (served by Wilhelm backend)
+
+
+class SegmentFromUrlRequest(BaseModel):
+    image_url: str
+    bbox: list[float]           # [x1, y1, x2, y2]
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -359,8 +373,8 @@ def segment(req: ProbeRequest):
 
 
 def grid_detect(img: np.ndarray, grid: int = 8,
-                iou_thresh: float = 0.83,
-                nms_thresh: float = 0.65,
+                iou_thresh: float = 0.7,
+                nms_thresh: float = 0.7,
                 min_area: float = 0.002,
                 max_area: float = 0.40) -> list[dict]:
     """
@@ -480,6 +494,87 @@ def get_gt_overlay(image_id: str):
         "regions":      per_region,
         "region_count": len(per_region),
     }
+
+
+def _load_image_from_url(url: str) -> np.ndarray:
+    """Fetch an image from a URL and return it as an RGB numpy array."""
+    try:
+        resp = httpx.get(url, timeout=15)
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Failed to fetch image from Wilhelm: {e}")
+    img = np.array(Image.open(io.BytesIO(resp.content)).convert("RGB"))
+    return img
+
+
+@app.post("/analyze-url", response_model=PresegmentResult)
+def analyze_url(req: AnalyzeUrlRequest):
+    """
+    Zero-shot fracture detection on an image served by Wilhelm backend.
+    The Spring backend calls this with the X-ray download URL; the model runs
+    inference and returns all detected fracture regions with overlays.
+    """
+    if not predictor:
+        raise HTTPException(503, "Model not loaded")
+
+    img = _load_image_from_url(req.image_url)
+    H, W = img.shape[:2]
+    color = [255, 60, 60]
+
+    detections = grid_detect(img)
+    if not detections:
+        return PresegmentResult(segments=[], overlay_b64=to_b64(img, fmt="JPEG"))
+
+    composite = img.copy()
+    segments = []
+    for i, det in enumerate(detections):
+        mask = det["mask"]
+        composite = build_overlay(composite, mask, color, alpha=0.35)
+        ys, xs = np.where(mask)
+        bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) else [0, 0, W, H]
+        segments.append({
+            "ann_id":    i,
+            "bbox":      bbox,
+            "mask_b64":  mask_to_b64(mask),
+            "iou_score": round(det["score"], 4),
+            "crop_b64":  crop_b64_from_mask(img, mask),
+        })
+
+    return PresegmentResult(
+        segments=segments,
+        overlay_b64=to_b64(composite, fmt="JPEG"),
+    )
+
+
+@app.post("/segment-url", response_model=ProbeResult)
+def segment_url(req: SegmentFromUrlRequest):
+    """
+    Segment a user-drawn bounding box on an image fetched by URL.
+    Used by the correction UI when a user draws a new region.
+    """
+    if not predictor:
+        raise HTTPException(503, "Model not loaded")
+
+    img = _load_image_from_url(req.image_url)
+
+    with torch.no_grad():
+        predictor.set_image(img)
+        masks, iou_scores, _ = predictor.predict(
+            box=np.array(req.bbox, dtype=float),
+            multimask_output=True,
+        )
+
+    best_idx = int(np.argmax(iou_scores))
+    best_mask = masks[best_idx].astype(np.uint8)
+
+    return ProbeResult(
+        mask_b64=mask_to_b64(best_mask),
+        all_masks_b64=[mask_to_b64(m.astype(np.uint8)) for m in masks],
+        iou_scores=[round(float(s), 4) for s in iou_scores],
+        best_index=best_idx,
+        overlay_b64=to_b64(build_overlay(img, best_mask, PROBE_COLOR), fmt="JPEG"),
+        crop_b64=crop_b64_from_mask(img, best_mask),
+    )
 
 
 @app.post("/report")

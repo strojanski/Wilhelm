@@ -8,6 +8,23 @@ data class CreateVisitRequest(
     val visitDate: LocalDate
 )
 
+data class FractureSegment(
+    val annId: Int,
+    val bbox: List<Int>,       // [x1, y1, x2, y2]
+    val iouScore: Double,
+    val userCorrected: Boolean = false
+)
+
+data class XrayAnalysis(
+    val segments: List<FractureSegment>,
+    val analyzedAt: Instant = Instant.now(),
+    val corrected: Boolean = false
+)
+
+data class SaveAnnotationsRequest(
+    val segments: List<FractureSegment>
+)
+
 data class VisitResponse(
     val id: Long,
     val patientEhrId: String,
@@ -15,7 +32,8 @@ data class VisitResponse(
     val createdAt: Instant,
     val triageFiles: List<String>,
     val reportFiles: List<String>,
-    val xrayFiles: List<String>
+    val xrayFiles: List<String>,
+    val xrayAnnotations: Map<String, XrayAnalysis>
 )
 
 fun Visit.toResponse() = VisitResponse(
@@ -25,7 +43,8 @@ fun Visit.toResponse() = VisitResponse(
     createdAt = createdAt,
     triageFiles = triageFiles.toFileList(),
     reportFiles = reportFiles.toFileList(),
-    xrayFiles   = xrayFiles.toFileList()
+    xrayFiles   = xrayFiles.toFileList(),
+    xrayAnnotations = emptyMap()
 )
 
 private fun String.toFileList(): List<String> =

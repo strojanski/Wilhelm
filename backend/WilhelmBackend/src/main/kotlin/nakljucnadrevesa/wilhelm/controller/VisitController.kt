@@ -1,6 +1,7 @@
 package nakljucnadrevesa.wilhelm.controller
 
 import nakljucnadrevesa.wilhelm.dto.CreateVisitRequest
+import nakljucnadrevesa.wilhelm.dto.SaveAnnotationsRequest
 import nakljucnadrevesa.wilhelm.dto.VisitResponse
 import nakljucnadrevesa.wilhelm.service.DocumentType
 import nakljucnadrevesa.wilhelm.service.VisitService
@@ -63,6 +64,20 @@ class VisitController(private val visitService: VisitService) {
     @GetMapping("/{visitId}/xray/{filename}")
     fun downloadXray(@PathVariable visitId: Long, @PathVariable filename: String): ResponseEntity<Resource> =
         visitService.downloadDocument(visitId, DocumentType.XRAY, filename).asAttachment(filename, MediaType.IMAGE_PNG)
+
+    @PostMapping("/{visitId}/xray/{filename}/analyze")
+    fun analyzeXray(
+        @PathVariable ehrId: String,
+        @PathVariable visitId: Long,
+        @PathVariable filename: String,
+    ): VisitResponse = visitService.analyzeXray(ehrId, visitId, filename)
+
+    @PutMapping("/{visitId}/xray/{filename}/annotations")
+    fun saveAnnotations(
+        @PathVariable visitId: Long,
+        @PathVariable filename: String,
+        @RequestBody req: SaveAnnotationsRequest,
+    ): VisitResponse = visitService.saveAnnotations(visitId, filename, req)
 
     private fun Resource.asAttachment(filename: String, mediaType: MediaType): ResponseEntity<Resource> =
         ResponseEntity.ok()
