@@ -159,12 +159,14 @@ export default function XrayDetailPage() {
           ctx.fillRect(rx, ry, rw, rh);
         }
 
-        // Outline
-        ctx.strokeStyle = border;
-        ctx.lineWidth = isSelected ? 3 : 1.5;
-        ctx.setLineDash(maskImg && !isSelected ? [4, 2] : []);
-        ctx.strokeRect(rx, ry, rw, rh);
-        ctx.setLineDash([]);
+        // Outline: draw bbox only when no mask (user-drawn) or selected
+        if (!maskImg || isSelected) {
+          ctx.strokeStyle = border;
+          ctx.lineWidth = isSelected ? 3 : 1.5;
+          ctx.setLineDash([]);
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.setLineDash([]);
+        }
 
         // Label
         ctx.font = `bold ${Math.max(10, 12 * sx)}px system-ui`;
