@@ -1,0 +1,25 @@
+{
+  "image_id": "IMG0001793",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.6595,
+    "prob_fracture": 0.3405,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        206,
+        174,
+        246,
+        196
+      ],
+      "yolo_conf": 0.3305,
+      "sam_score": 0.788,
+      "mask_path": "masks/IMG0001793_det0.png"
+    }
+  ]
+}

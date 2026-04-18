@@ -1,0 +1,25 @@
+{
+  "image_id": "IMG0003376",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.5485,
+    "prob_fracture": 0.4515,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        149,
+        208,
+        185,
+        230
+      ],
+      "yolo_conf": 0.6502,
+      "sam_score": 0.7901,
+      "mask_path": "masks/IMG0003376_det0.png"
+    }
+  ]
+}

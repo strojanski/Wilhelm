@@ -1,0 +1,12 @@
+{
+  "image_id": "IMG0002431",
+  "split": "train",
+  "has_fracture_gt": true,
+  "classifier": {
+    "prob_normal": 0.966,
+    "prob_fracture": 0.034,
+    "predicted_fracture": false,
+    "threshold": 0.0853
+  },
+  "detections": []
+}

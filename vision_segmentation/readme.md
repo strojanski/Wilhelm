@@ -1,102 +1,231 @@
-# X-Ray Anomaly Detection — Hackathon Setup
+# RadiAI — Privacy-Preserving AI Radiology Triage
 
-## Goal
-Segment X-ray images and highlight anomalies across multiple body regions.
-Main demo: chest. Supporting examples: hands, arms, legs.
+AI-powered bone fracture detection, segmentation, and clinical report generation.
+All inference runs on **Flare confidential compute** — patient data is cryptographically protected.
+
+**Pipeline:** Triage classifier → SAM-Med2D zero-shot segmentation → Gemma clinical report
 
 ---
 
-## Model
+## Replication — Step by Step
 
-**SAM-Med2D** — SAM with adapter layers trained on 4.6M medical image-mask pairs across 31 datasets. Better zero-shot performance than MedSAM on 2D medical images; adapter architecture makes fine-tuning cheap (freeze ViT backbone, train adapters + decoder only).
+### 1. Clone the repo
+
+```bash
+git clone <repo-url>
+cd vision_segmentation
+```
+
+### 2. Create and activate a virtual environment
+
+```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Unix / macOS
+source .venv/bin/activate
+```
+
+### 3. Install PyTorch with CUDA
+
+Check your CUDA driver version: `nvidia-smi` — look at the top-right number.
+
+```bash
+# CUDA 12.6 (adjust cu* to match your driver)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# CPU-only fallback
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+### 4. Clone and register SAM-Med2D
+
+SAM-Med2D has no `setup.py` — register it via a `.pth` file so Python can import it.
 
 ```bash
 git clone https://github.com/OpenGVLab/SAM-Med2D
-cd SAM-Med2D && pip install -e . && cd ..
 ```
 
-- Checkpoint: download `sam-med2d_b.pth` from the repo releases
-- Use zero-shot first. Fine-tune on HPC if zero-shot results are weak.
-
----
-
-## Datasets
-
-### Chest (main demo)
-
-| Dataset | Size | Labels | Access |
-|---|---|---|---|
-| VinDr-CXR | ~18K images | 22 anomaly types, radiologist bounding boxes | [PhysioNet](https://physionet.org/content/vindr-cxr/1.0.0/) |
-| CheXmask | 657K masks | Anatomical segmentation masks | [HuggingFace](https://huggingface.co/spaces/ngaggion/Chest-x-ray-HybridGNet-Segmentation) |
-
-### Musculoskeletal (supporting examples)
-
-| Dataset | Size | Labels | Access |
-|---|---|---|---|
-| FracAtlas | 4,083 images | Fracture masks + bboxes, hand/leg/hip/shoulder | [HuggingFace](https://huggingface.co/datasets/yh0701/FracAtlas_dataset) |
-| MURA (Stanford) | ~40K images | Normal / abnormal, 7 body parts | [Stanford](https://stanfordmlgroup.github.io/competitions/mura/) |
-
-> **FracAtlas** is CC-BY 4.0 and directly loadable via HuggingFace datasets — start here for non-chest examples.
-
----
-
-## Suggested Project Structure
-
-```
-xray-hackathon/
-├── data/
-│   ├── vindrcxr/
-│   ├── chexmask/
-│   ├── fracatlas/
-│   └── mura/
-├── notebooks/
-│   ├── 01_explore_vindrcxr.ipynb
-│   ├── 02_explore_fracatlas.ipynb
-│   └── 03_inference.ipynb
-├── scripts/
-│   ├── download_data.py        # via HuggingFace datasets
-│   ├── run_inference.py        # zero-shot inference
-│   ├── evaluate.py             # IoU + Dice metrics
-│   └── visualize_masks.py      # overlay masks on images
-├── SAM-Med2D/                  # cloned repo
-└── README.md
+Find your venv site-packages path:
+```bash
+python -c "import site; print(site.getsitepackages()[0])"
 ```
 
----
+Create a file called `sam_med2d.pth` in that directory containing the **absolute path** to the cloned repo:
+```
+C:\Users\you\...\vision_segmentation\SAM-Med2D
+```
 
-## Quick Start: Load FracAtlas
+Then install the extra dependency:
+```bash
+pip install albumentations
+```
+
+### 5. Download the SAM-Med2D checkpoint
+
+Download `sam-med2d_b.pth` from the [SAM-Med2D releases page](https://github.com/OpenGVLab/SAM-Med2D/releases) and place it at:
+```
+SAM-Med2D/sam-med2d_b.pth
+```
+
+### 6. Patch PyTorch 2.6+ compatibility
+
+PyTorch 2.6 changed `torch.load` to default `weights_only=True`, which breaks the SAM-Med2D checkpoint loader. Open `SAM-Med2D/segment_anything/build_sam.py` and change:
 
 ```python
-from datasets import load_dataset
+# Before
+state_dict = torch.load(f, map_location="cpu")
 
-ds = load_dataset("yh0701/FracAtlas_dataset")
-print(ds)
+# After
+state_dict = torch.load(f, map_location="cpu", weights_only=False)
 ```
 
-## Quick Start: SAM-Med2D Inference
+### 7. Install project dependencies
 
-```python
-import numpy as np
-from segment_anything import sam_model_registry, SamPredictor
+```bash
+pip install -r requirements.txt
+```
 
-model = sam_model_registry["vit_b"](checkpoint="SAM-Med2D/sam-med2d_b.pth")
-model.eval()
-predictor = SamPredictor(model)
+`requirements.txt` contents:
+```
+datasets>=2.0
+torch>=2.0
+torchvision
+numpy
+Pillow
+matplotlib
+tqdm
+opencv-python-headless
+albumentations
+fastapi
+uvicorn
+pandas
+python-multipart
+```
 
-# Set image (H x W x 3, uint8)
-predictor.set_image(image_np)
+### 8. Download FracAtlas
 
-# Run inference with bounding box prompt [x_min, y_min, x_max, y_max]
-bbox = np.array([[50, 50, 200, 200]])
-masks, _, _ = predictor.predict(box=bbox, multimask_output=False)
-mask = masks[0]  # H x W binary mask
+FracAtlas must be downloaded manually from [Kaggle](https://www.kaggle.com/datasets/bmadushanirodrigo/fracatlas) (CC-BY 4.0).
+
+Expected directory structure after extraction:
+```
+data/FracAtlas/
+  images/
+    Fractured/         ← 717 X-rays with fractures
+    Non_fractured/     ← 3,366 normal X-rays
+  Annotations/
+    COCO JSON/
+      COCO_fracture_masks.json
+  Utilities/
+    Fracture Split/
+      train.csv
+      valid.csv
+      test.csv
+  dataset.csv
 ```
 
 ---
 
-## Next Steps (in order)
+## Running the Pipeline
 
-1. Load FracAtlas via HuggingFace, visualize a few images + masks
-2. Run SAM-Med2D zero-shot on a bone X-ray (FracAtlas)
-3. Run SAM-Med2D zero-shot on a chest X-ray (VinDr-CXR)
-4. Compare zero-shot mask quality visually — fine-tune on HPC if needed
+### Batch inference (offline evaluation)
+
+```bash
+cd scripts
+
+# Run SAM-Med2D on all fractured images → data/FracAtlas/predictions/
+python run_inference.py
+
+# Evaluate IoU + Dice → stdout + data/FracAtlas/results.csv
+python evaluate.py
+
+# Visualize side-by-side overlays → data/FracAtlas/visualizations/
+python visualize.py --n 20          # first 20
+python visualize.py --all           # all images
+python visualize.py --all --no-gt   # predictions only
+```
+
+### Interactive demo (web app)
+
+```bash
+cd scripts
+uvicorn api:app --reload --port 8000
+```
+
+Open `frontend/index.html` directly in a browser (no build step needed).
+
+The app will:
+1. Run the triage classifier on load
+2. Auto-detect fractures with SAM-Med2D (zero-shot, no GT prompts)
+3. Allow GT vs AI comparison with live IoU
+4. Let you draw a bounding box to probe any region
+5. Generate a structured clinical report (Gemma stub — wire in your endpoint)
+
+---
+
+## Project Structure
+
+```
+vision_segmentation/
+  scripts/
+    api.py              ← FastAPI backend (SAM-Med2D + endpoints)
+    run_inference.py    ← Batch inference on FracAtlas
+    evaluate.py         ← IoU + Dice metrics
+    visualize.py        ← Overlay visualizations
+    download_data.py    ← HuggingFace dataset download helper
+  frontend/
+    index.html          ← Single-file web app, no build step
+  SAM-Med2D/            ← Cloned (not committed)
+  data/FracAtlas/       ← Downloaded manually (not committed)
+  requirements.txt
+  CLAUDE.md
+```
+
+---
+
+## Wiring in Real Models
+
+**Triage classifier** — replace the body of `classify()` in `scripts/api.py`:
+```python
+@app.post("/classify")
+def classify(req: ClassifyRequest):
+    # Replace stub with:
+    img = load_image(req.image_id)
+    result = your_classifier_model(img)
+    return {"normal": ..., "urgency": ..., "confidence": ...}
+```
+
+**Gemma report** — replace `build_stub_report()` return value in `scripts/api.py`:
+```python
+# In generate_report():
+prompt = build_report_prompt(req.image_id, req.patient, req.detections, req.triage)
+# Replace stub with:
+narrative = call_gemma_api(prompt, crop_b64=req.detections[0].get("crop_b64"))
+```
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Server status, device, model loaded |
+| GET | `/images` | List all available image IDs |
+| GET | `/image/{id}` | X-ray image + metadata |
+| POST | `/classify` | Triage: normal/abnormal, urgency |
+| GET | `/presegment/{id}` | Zero-shot SAM-Med2D detection |
+| GET | `/gt_overlay/{id}` | Radiologist GT mask overlay |
+| POST | `/segment` | Probe a drawn bounding box |
+| POST | `/report` | Generate clinical report (Gemma stub) |
+
+---
+
+## Key Technical Notes
+
+- SAM-Med2D uses `image_size=256` and `encoder_adapter=True` — different from original SAM
+- Use `SammedPredictor` (not `SamPredictor`) from `segment_anything.predictor_sammed`
+- Model registry takes an `argparse.Namespace` object, not keyword args
+- COCO bbox format is `[x, y, w, h]` — convert to `[x1, y1, x2, y2]` before passing to predictor
+- `presegment` uses an 8×8 point grid + greedy NMS — no GT data used

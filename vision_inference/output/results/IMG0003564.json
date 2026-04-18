@@ -1,0 +1,25 @@
+{
+  "image_id": "IMG0003564",
+  "split": "test",
+  "has_fracture_gt": true,
+  "classifier": {
+    "prob_normal": 0.0676,
+    "prob_fracture": 0.9324,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        236,
+        227,
+        269,
+        247
+      ],
+      "yolo_conf": 0.6796,
+      "sam_score": 0.7817,
+      "mask_path": "masks/IMG0003564_det0.png"
+    }
+  ]
+}

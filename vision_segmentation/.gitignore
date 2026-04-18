@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Model checkpoints (large binaries)
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.safetensors
+
+# Dataset (download locally, don't commit)
+data/
+
+# Generated outputs
+data/FracAtlas/predictions/
+data/FracAtlas/visualizations/
+data/FracAtlas/results.csv
+
+# SAM-Med2D cloned repo (clone fresh, don't commit)
+SAM-Med2D/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Misc
+*.log
+$null
