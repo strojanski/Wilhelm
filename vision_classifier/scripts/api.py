@@ -98,6 +98,7 @@ def draw_overlay(img: Image.Image, prob: float, send_to_segmentation: bool, true
 
 class ClassifyRequest(BaseModel):
     image_b64:  str
+    image_id:   Optional[str] = None   # e.g. "IMG0000019.jpg" — skips MedSigLIP if cached
     true_label: Optional[str] = None   # "fractured" | "normal" — optional, for overlay only
 
 
@@ -123,7 +124,7 @@ def health():
 def classify(req: ClassifyRequest):
     from model import predict
     img  = decode_image(req.image_b64)
-    prob = predict(img)
+    prob = predict(img, image_id=req.image_id)
 
     send_to_segmentation = prob >= SEGMENTATION_THRESHOLD
     overlay = draw_overlay(img, prob, send_to_segmentation, true_label=req.true_label)
