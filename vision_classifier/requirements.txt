@@ -1,0 +1,14 @@
+transformers>=4.45
+datasets>=2.0,<3.0
+accelerate
+torch>=2.0
+pillow
+numpy
+pandas
+scikit-learn
+tqdm
+huggingface_hub
+sentencepiece
+matplotlib
+seaborn
+kaggle
