@@ -1,0 +1,173 @@
+"""
+FastAPI inference service wrapping the full pipeline.
+
+Run from vision_inference/:
+    uvicorn api:app --reload --port 8000
+"""
+
+import base64
+import io
+import pickle
+import sys
+from pathlib import Path
+from typing import List
+
+import httpx
+import numpy as np
+import torch
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+from pydantic import BaseModel
+
+ROOT           = Path(__file__).parent.parent
+CACHE_PATH     = ROOT / "vision_classifier/embedding_cache.pkl"
+CLF_PATH       = ROOT / "vision_classifier/fracture_classifier_v3_0.91auc.pkl"
+YOLO_WEIGHTS   = ROOT / "vision_segmentation/weights/best.pt"
+SAM_CHECKPOINT = ROOT / "vision_segmentation/SAM-Med2D/sam-med2d_b.pth"
+
+THRESHOLD = 0.0853
+DEVICE    = "cuda" if torch.cuda.is_available() else "cpu"
+
+app = FastAPI(title="Vision Inference API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_resources: dict = {}
+
+
+@app.on_event("startup")
+def load_models():
+    print("Loading embedding cache …")
+    with open(CACHE_PATH, "rb") as f:
+        _resources["emb_cache"] = pickle.load(f)
+    print(f"  {len(_resources['emb_cache'])} embeddings loaded")
+
+    print("Loading LR classifier …")
+    try:
+        import joblib
+        _resources["clf"] = joblib.load(CLF_PATH)
+    except Exception:
+        with open(CLF_PATH, "rb") as f:
+            _resources["clf"] = pickle.load(f)
+
+    print("Loading YOLO …")
+    from ultralytics import YOLO
+    _resources["detector"] = YOLO(str(YOLO_WEIGHTS))
+
+    print(f"Loading SAM-Med2D on {DEVICE} …")
+    import argparse as ap
+    sys.path.insert(0, str(ROOT / "vision_segmentation/SAM-Med2D"))
+    from segment_anything import sam_model_registry
+    from segment_anything.predictor_sammed import SammedPredictor
+    args = ap.Namespace(
+        image_size=256,
+        sam_checkpoint=str(SAM_CHECKPOINT),
+        encoder_adapter=True,
+    )
+    model = sam_model_registry["vit_b"](args)
+    model.eval()
+    model.to(DEVICE)
+    _resources["predictor"] = SammedPredictor(model)
+    print("All models loaded.")
+
+
+class Segment(BaseModel):
+    ann_id:    int
+    bbox:      List[int]
+    iou_score: float
+    mask_b64:  str  # base64-encoded PNG of the binary mask (same size as original image)
+
+
+class AnalyzeResponse(BaseModel):
+    segments:           List[Segment]
+    prob_fracture:      float
+    predicted_fracture: bool
+
+
+class AnalyzeUrlRequest(BaseModel):
+    image_url: str
+
+
+def _classify_from_cache(filename: str) -> float:
+    emb_cache = _resources["emb_cache"]
+    clf       = _resources["clf"]
+    if filename not in emb_cache:
+        raise HTTPException(status_code=404, detail=f"No embedding cached for '{filename}'. Run build_cache.py first.")
+    emb = emb_cache[filename].reshape(1, -1)
+    return float(clf.predict_proba(emb)[0, 1])
+
+
+def _run_inference(img: Image.Image, filename: str, yolo_conf: float = 0.25) -> AnalyzeResponse:
+    detector  = _resources["detector"]
+    predictor = _resources["predictor"]
+
+    prob_fracture = _classify_from_cache(filename)
+    predicted     = prob_fracture >= THRESHOLD
+
+    segments: list[Segment] = []
+    if predicted:
+        img_np   = np.array(img.convert("RGB"))
+        yolo_res = detector.predict(img_np, conf=yolo_conf, verbose=False)[0]
+        boxes    = yolo_res.boxes.xyxy.cpu().numpy() if len(yolo_res.boxes) else []
+        confs    = yolo_res.boxes.conf.cpu().numpy() if len(yolo_res.boxes) else []
+
+        if len(boxes):
+            with torch.no_grad():
+                predictor.set_image(img_np)
+                for i, (box, _) in enumerate(zip(boxes, confs)):
+                    x1, y1, x2, y2 = map(float, box[:4])
+                    masks, scores, _ = predictor.predict(
+                        box=np.array([x1, y1, x2, y2]),
+                        multimask_output=True,
+                    )
+                    best  = int(np.argmax(scores))
+                    score = float(scores[best])
+                    mask  = masks[best].astype(np.uint8) * 255
+                    buf   = io.BytesIO()
+                    Image.fromarray(mask).save(buf, format="PNG")
+                    mask_b64 = base64.b64encode(buf.getvalue()).decode()
+                    segments.append(Segment(
+                        ann_id    = i,
+                        bbox      = [round(x1), round(y1), round(x2), round(y2)],
+                        iou_score = round(score, 4),
+                        mask_b64  = mask_b64,
+                    ))
+
+    return AnalyzeResponse(
+        segments           = segments,
+        prob_fracture      = round(prob_fracture, 4),
+        predicted_fracture = predicted,
+    )
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "device": DEVICE, "threshold": THRESHOLD,
+            "cached_embeddings": len(_resources.get("emb_cache", {}))}
+
+
+@app.post("/analyze-url", response_model=AnalyzeResponse)
+def analyze_url(req: AnalyzeUrlRequest):
+    """Fetch image from URL and run full pipeline. Called by Spring Boot backend."""
+    # Extract filename from URL to look up the cached embedding
+    filename = Path(req.image_url).name
+
+    try:
+        resp = httpx.get(req.image_url, timeout=30)
+        resp.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
+
+    try:
+        img = Image.open(io.BytesIO(resp.content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
+
+    result = _run_inference(img, filename)
+    print(result.model_dump_json(indent=2, exclude={"segments": {"__all__": {"mask_b64"}}}))
+    return result

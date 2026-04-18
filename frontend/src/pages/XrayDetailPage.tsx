@@ -54,6 +54,7 @@ export default function XrayDetailPage() {
   const [selectedSeg, setSelectedSeg] = useState<number | null>(null);
 
   useEffect(() => {
+    maskImagesRef.current.clear();
     setSegments(analysis?.segments ?? []);
     setDirty(false);
   }, [analysis]);
@@ -66,6 +67,29 @@ export default function XrayDetailPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [imgNaturalSize, setImgNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  // Pre-loaded HTMLImageElements for SAM masks, keyed by annId
+  const maskImagesRef = useRef<Map<number, HTMLImageElement>>(new Map());
+
+  // Pre-load mask images whenever segments change
+  useEffect(() => {
+    let cancelled = false;
+    const map = maskImagesRef.current;
+    const pending: Promise<void>[] = [];
+    segments.forEach((seg) => {
+      if (!seg.maskB64 || map.has(seg.annId)) return;
+      const p = new Promise<void>((resolve) => {
+        const img = new window.Image();
+        img.onload = () => { if (!cancelled) { map.set(seg.annId, img); } resolve(); };
+        img.onerror = resolve;
+        img.src = `data:image/png;base64,${seg.maskB64}`;
+      });
+      pending.push(p);
+    });
+    if (pending.length > 0) {
+      Promise.all(pending).then(() => { if (!cancelled) renderCanvas(); });
+    }
+    return () => { cancelled = true; };
+  }, [segments]);
 
   // ── mutations ──────────────────────────────────────────────────────────────
   const analyzeMut = useMutation({
@@ -104,14 +128,49 @@ export default function XrayDetailPage() {
       segments.forEach((seg, idx) => {
         const [x1, y1, x2, y2] = seg.bbox;
         const rx = x1 * sx, ry = y1 * sy, rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
-        ctx.fillStyle = seg.userCorrected ? USER_COLOR : FRACTURE_COLOR;
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.strokeStyle = seg.userCorrected ? USER_BORDER : FRACTURE_BORDER;
-        ctx.lineWidth = selectedSeg === idx ? 3 : 2;
+        const isSelected = selectedSeg === idx;
+        const border = seg.userCorrected ? USER_BORDER : FRACTURE_BORDER;
+        const [r, g, b] = seg.userCorrected ? [255, 200, 0] : [255, 60, 60];
+        const maskImg = maskImagesRef.current.get(seg.annId);
+
+        if (maskImg) {
+          // Recolor SAM mask pixels → fracture/user color via offscreen canvas
+          const offscreen = document.createElement('canvas');
+          offscreen.width = nw;
+          offscreen.height = nh;
+          const offCtx = offscreen.getContext('2d')!;
+          offCtx.drawImage(maskImg, 0, 0, nw, nh);
+          const pixels = offCtx.getImageData(0, 0, nw, nh);
+          for (let i = 0; i < pixels.data.length; i += 4) {
+            if (pixels.data[i] > 128) {
+              pixels.data[i]     = r;
+              pixels.data[i + 1] = g;
+              pixels.data[i + 2] = b;
+              pixels.data[i + 3] = isSelected ? 180 : 120;
+            } else {
+              pixels.data[i + 3] = 0;
+            }
+          }
+          offCtx.putImageData(pixels, 0, 0);
+          ctx.drawImage(offscreen, 0, 0, displayW, displayH);
+        } else {
+          // Fallback bbox fill (user-drawn regions / mask not yet loaded)
+          ctx.fillStyle = seg.userCorrected ? USER_COLOR : FRACTURE_COLOR;
+          ctx.fillRect(rx, ry, rw, rh);
+        }
+
+        // Outline
+        ctx.strokeStyle = border;
+        ctx.lineWidth = isSelected ? 3 : 1.5;
+        ctx.setLineDash(maskImg && !isSelected ? [4, 2] : []);
         ctx.strokeRect(rx, ry, rw, rh);
+        ctx.setLineDash([]);
+
+        // Label
         ctx.font = `bold ${Math.max(10, 12 * sx)}px system-ui`;
-        ctx.fillStyle = seg.userCorrected ? USER_BORDER : FRACTURE_BORDER;
+        ctx.fillStyle = border;
         ctx.fillText(seg.userCorrected ? 'corrected' : `${Math.round(seg.iouScore * 100)}%`, rx + 3, ry - 3);
+
         if (mode === 'delete') {
           ctx.fillStyle = 'rgba(220,38,38,0.9)';
           ctx.beginPath(); ctx.arc(rx + rw - 6, ry + 6, 8, 0, Math.PI * 2); ctx.fill();

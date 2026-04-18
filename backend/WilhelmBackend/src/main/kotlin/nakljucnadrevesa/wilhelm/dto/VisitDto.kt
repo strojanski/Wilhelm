@@ -12,7 +12,8 @@ data class FractureSegment(
     val annId: Int,
     val bbox: List<Int>,       // [x1, y1, x2, y2]
     val iouScore: Double,
-    val userCorrected: Boolean = false
+    val userCorrected: Boolean = false,
+    val maskB64: String? = null  // base64-encoded PNG mask from SAM-Med2D
 )
 
 data class XrayAnalysis(

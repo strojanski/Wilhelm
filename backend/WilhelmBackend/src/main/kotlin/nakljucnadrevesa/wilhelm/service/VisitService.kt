@@ -136,10 +136,11 @@ class VisitService(
         val segments = rawSegments.map { s ->
             @Suppress("UNCHECKED_CAST")
             FractureSegment(
-                annId      = (s["ann_id"] as? Int) ?: 0,
-                bbox       = ((s["bbox"] as? List<Number>) ?: emptyList()).map { it.toInt() },
-                iouScore   = ((s["iou_score"] as? Number) ?: 0.0).toDouble(),
+                annId         = (s["ann_id"] as? Int) ?: 0,
+                bbox          = ((s["bbox"] as? List<Number>) ?: emptyList()).map { it.toInt() },
+                iouScore      = ((s["iou_score"] as? Number) ?: 0.0).toDouble(),
                 userCorrected = false,
+                maskB64       = s["mask_b64"] as? String,
             )
         }
 

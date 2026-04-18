@@ -22,6 +22,7 @@ export interface FractureSegment {
   bbox: [number, number, number, number]; // [x1, y1, x2, y2]
   iouScore: number;
   userCorrected: boolean;
+  maskB64?: string; // base64-encoded PNG mask from SAM-Med2D
 }
 
 export interface XrayAnalysis {
