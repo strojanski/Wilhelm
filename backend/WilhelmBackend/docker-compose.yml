@@ -1,0 +1,15 @@
+services:
+  app:
+    image: wilhelm:latest
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: <url>
+      SPRING_DATASOURCE_USERNAME: <name>
+      SPRING_DATASOURCE_PASSWORD: <password>
+      APP_REPORTS_DIRECTORY: /opt/wilhelm-server/reports
+    volumes:
+      - reports:/opt/wilhelm-server/reports
+
+volumes:
+  reports:
