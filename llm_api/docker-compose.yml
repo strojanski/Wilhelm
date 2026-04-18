@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    image: gemma-api:latest
+    container_name: gemma-api
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    # Uncomment if you run vLLM on the host machine:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
