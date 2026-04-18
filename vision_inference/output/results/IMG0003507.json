@@ -1,0 +1,12 @@
+{
+  "image_id": "IMG0003507",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.998,
+    "prob_fracture": 0.002,
+    "predicted_fracture": false,
+    "threshold": 0.0853
+  },
+  "detections": []
+}

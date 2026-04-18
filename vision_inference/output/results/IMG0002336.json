@@ -1,0 +1,25 @@
+{
+  "image_id": "IMG0002336",
+  "split": "train",
+  "has_fracture_gt": true,
+  "classifier": {
+    "prob_normal": 0.2775,
+    "prob_fracture": 0.7225,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        1519,
+        1211,
+        1769,
+        1423
+      ],
+      "yolo_conf": 0.9269,
+      "sam_score": 0.7933,
+      "mask_path": "masks/IMG0002336_det0.png"
+    }
+  ]
+}

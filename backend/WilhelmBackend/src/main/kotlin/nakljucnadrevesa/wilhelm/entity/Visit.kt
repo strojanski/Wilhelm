@@ -24,5 +24,8 @@ class Visit(
 
     @Column(name = "triage_files") var triageFiles: String = "",
     @Column(name = "report_files") var reportFiles: String = "",
-    @Column(name = "xray_files")   var xrayFiles:   String = ""
+    @Column(name = "xray_files")   var xrayFiles:   String = "",
+
+    @Column(name = "xray_annotations", columnDefinition = "TEXT")
+    var xrayAnnotations: String = "{}"
 )
