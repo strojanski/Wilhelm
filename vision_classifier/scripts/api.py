@@ -1,5 +1,5 @@
 """
-FastAPI classifier service — mirrors vision_segmentation/scripts/api.py structure.
+FastAPI classifier service.
 
 Run from vision_classifier/scripts/:
     uvicorn api:app --reload --port 8001
@@ -18,11 +18,10 @@ from pydantic import BaseModel
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
+CLF_PATH  = Path(os.getenv("CLF_PATH", str(Path(__file__).parent.parent / "fracture_classifier_v3_0.91auc.pkl")))
 MODEL_DIR = Path(os.getenv("MODEL_DIR", str(Path(__file__).parent.parent / "medsiglip-448")))
-CLF_PATH  = Path(os.getenv("CLF_PATH",  str(Path(__file__).parent.parent / "fracture_classifier_v3_0.91auc.pkl")))
 
 # Calibrated to ≥90% recall on the FracAtlas test set.
-# Controls whether the backend should forward this image to the segmentation service.
 SEGMENTATION_THRESHOLD = 0.0853
 
 # ── App ────────────────────────────────────────────────────────────────────────
@@ -40,7 +39,6 @@ app.add_middleware(
 def load_resources():
     from model import load_model
     load_model(model_dir=MODEL_DIR, clf_path=CLF_PATH)
-    print(f"Segmentation threshold: {SEGMENTATION_THRESHOLD}")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -60,36 +58,36 @@ def encode_image(img: Image.Image, fmt="JPEG") -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def draw_overlay(img: Image.Image, prob: float, send_to_segmentation: bool, true_label: Optional[str] = None) -> Image.Image:
-    """Draw probability on the image. Border is red when above segmentation threshold, green otherwise."""
-    out   = img.convert("RGB").copy()
-    draw  = ImageDraw.Draw(out)
-    W, H  = out.size
+def draw_overlay(img: Image.Image, prob: float, above_threshold: bool,
+                 true_label: Optional[str] = None) -> Image.Image:
+    out  = img.convert("RGB").copy()
+    draw = ImageDraw.Draw(out)
+    W, H = out.size
 
-    color = (220, 50, 50) if send_to_segmentation else (50, 180, 50)
-
+    color  = (220, 50, 50) if above_threshold else (50, 180, 50)
     border = max(4, H // 80)
     draw.rectangle([0, 0, W - 1, H - 1], outline=color, width=border)
 
-    label   = f"{prob*100:.1f}%"
-    font_sz = max(16, H // 20)
+    label   = f"FRACTURE PROBABILITY: {prob * 100:.1f}%"
+    padding = 8
+    font_sz = max(16, W // 22)
     try:
         font = ImageFont.truetype("arial.ttf", font_sz)
     except Exception:
         font = ImageFont.load_default()
 
-    padding = font_sz // 2
-    bbox    = draw.textbbox((0, 0), label, font=font)
-    tw, th  = bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-    draw.rectangle([padding - 4, padding - 4, padding + tw + 4, padding + th + 4], fill=color)
+    bbox   = draw.textbbox((0, 0), label, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.rectangle([padding - 2, padding - 2, padding + tw + 2, padding + th + 2], fill=color)
     draw.text((padding, padding), label, fill=(255, 255, 255), font=font)
 
     if true_label:
-        gt_text = f"GT: {true_label}"
-        draw.rectangle([padding - 4, padding + th + 8, padding + tw + 4, padding + 2 * th + 12],
-                       fill=(30, 30, 30))
-        draw.text((padding, padding + th + 8), gt_text, fill=(220, 220, 220), font=font)
+        gt_text    = f"Ground truth: {true_label}"
+        gt_bbox    = draw.textbbox((0, 0), gt_text, font=font)
+        gt_w, gt_h = gt_bbox[2] - gt_bbox[0], gt_bbox[3] - gt_bbox[1]
+        y2 = padding + th + 4
+        draw.rectangle([padding - 2, y2 - 2, padding + gt_w + 2, y2 + gt_h + 2], fill=(30, 30, 30))
+        draw.text((padding, y2), gt_text, fill=(220, 220, 220), font=font)
 
     return out
 
@@ -98,14 +96,14 @@ def draw_overlay(img: Image.Image, prob: float, send_to_segmentation: bool, true
 
 class ClassifyRequest(BaseModel):
     image_b64:  str
-    image_id:   Optional[str] = None   # e.g. "IMG0000019.jpg" — skips MedSigLIP if cached
-    true_label: Optional[str] = None   # "fractured" | "normal" — optional, for overlay only
+    image_id:   Optional[str] = None   # e.g. "IMG0000019.jpg" — uses cached embedding, skips MedSigLIP
+    true_label: Optional[str] = None   # for overlay only
 
 
 class ClassifyResponse(BaseModel):
-    prob_fractured:        float   # raw probability of fracture (0–1)
-    send_to_segmentation:  bool    # True when prob >= 0.0853 (≥90% recall threshold)
-    overlay_b64:           str     # JPEG with probability drawn on it (base64)
+    prob_fractured:       float   # 0–1
+    send_to_segmentation: bool    # True when prob >= 0.0853
+    overlay_b64:          str     # JPEG with probability drawn on it
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -116,7 +114,6 @@ def health():
         "status":                 "ok",
         "segmentation_threshold": SEGMENTATION_THRESHOLD,
         "classifier":             CLF_PATH.name,
-        "model":                  MODEL_DIR.name,
     }
 
 
@@ -126,11 +123,9 @@ def classify(req: ClassifyRequest):
     img  = decode_image(req.image_b64)
     prob = predict(img, image_id=req.image_id)
 
-    send_to_segmentation = prob >= SEGMENTATION_THRESHOLD
-    overlay = draw_overlay(img, prob, send_to_segmentation, true_label=req.true_label)
-
+    above = prob >= SEGMENTATION_THRESHOLD
     return ClassifyResponse(
         prob_fractured       = round(prob, 4),
-        send_to_segmentation = send_to_segmentation,
-        overlay_b64          = encode_image(overlay),
+        send_to_segmentation = above,
+        overlay_b64          = encode_image(draw_overlay(img, prob, above, req.true_label)),
     )
