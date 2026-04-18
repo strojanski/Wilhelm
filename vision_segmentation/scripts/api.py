@@ -29,12 +29,13 @@ from pydantic import BaseModel
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-DATA_DIR   = Path("../data/FracAtlas")
-CHECKPOINT = Path("../SAM-Med2D/sam-med2d_b.pth")
-COCO_JSON  = DATA_DIR / "Annotations/COCO JSON/COCO_fracture_masks.json"
-META_CSV   = DATA_DIR / "dataset.csv"
-IMG_DIRS   = [DATA_DIR / "images/Fractured", DATA_DIR / "images/Non_fractured"]
-DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
+DATA_DIR            = Path("../data/FracAtlas")
+CHECKPOINT          = Path("../SAM-Med2D/sam-med2d_b.pth")
+DETECTOR_CHECKPOINT = Path("../data/FracAtlas/detector_runs/fracture_det/weights/best.pt")
+COCO_JSON           = DATA_DIR / "Annotations/COCO JSON/COCO_fracture_masks.json"
+META_CSV            = DATA_DIR / "dataset.csv"
+IMG_DIRS            = [DATA_DIR / "images/Fractured", DATA_DIR / "images/Non_fractured"]
+DEVICE              = "cuda" if torch.cuda.is_available() else "cpu"
 
 PROBE_COLOR = [60, 160, 255]   # blue overlay for manual bbox probes
 
@@ -49,13 +50,14 @@ app.add_middleware(
 )
 
 predictor  = None
+detector   = None   # YOLOv8 fracture detector (loaded after training)
 meta_df    = None
 coco_index = None   # stem → {H, W, anns:[{id, bbox, segmentation}]}
 
 
 @app.on_event("startup")
 def load_resources():
-    global predictor, meta_df, coco_index
+    global predictor, detector, meta_df, coco_index
 
     from segment_anything import sam_model_registry
     from segment_anything.predictor_sammed import SammedPredictor
@@ -70,6 +72,13 @@ def load_resources():
     model.to(DEVICE)
     predictor = SammedPredictor(model)
     print(f"SAM-Med2D loaded on {DEVICE}")
+
+    if DETECTOR_CHECKPOINT.exists():
+        from ultralytics import YOLO
+        detector = YOLO(str(DETECTOR_CHECKPOINT))
+        print(f"YOLOv8 detector loaded from {DETECTOR_CHECKPOINT}")
+    else:
+        print("YOLOv8 detector not found — run train_detector.py first")
 
     if META_CSV.exists():
         meta_df = pd.read_csv(META_CSV, index_col="image_id")
@@ -372,50 +381,35 @@ def segment(req: ProbeRequest):
     )
 
 
-def grid_detect(img: np.ndarray, grid: int = 8,
-                iou_thresh: float = 0.7,
-                nms_thresh: float = 0.7,
-                min_area: float = 0.002,
-                max_area: float = 0.40) -> list[dict]:
+def detect_and_segment(img: np.ndarray, conf: float = 0.25) -> list[dict]:
     """
-    Zero-shot automatic detection via dense point grid.
-    Image encoder runs once; each grid point queries the decoder only.
+    YOLO detects fracture bboxes → SAM-Med2D segments each one.
+    Falls back to full-image bbox if detector not loaded.
     """
     H, W = img.shape[:2]
-    xs = [int(W * (i + 0.5) / grid) for i in range(grid)]
-    ys = [int(H * (i + 0.5) / grid) for i in range(grid)]
-    candidates: list[tuple[np.ndarray, float]] = []
-
     with torch.no_grad():
         predictor.set_image(img)
-        for cy in ys:
-            for cx in xs:
-                masks, scores, _ = predictor.predict(
-                    point_coords=np.array([[cx, cy]], dtype=float),
-                    point_labels=np.array([1]),
-                    multimask_output=True,
-                )
-                best  = int(np.argmax(scores))
-                score = float(scores[best])
-                if score < iou_thresh:
-                    continue
-                mask = masks[best].astype(np.uint8)
-                frac = mask.sum() / (H * W)
-                if not (min_area <= frac <= max_area):
-                    continue
-                candidates.append((mask, score))
 
-    candidates.sort(key=lambda t: -t[1])
-    kept: list[tuple[np.ndarray, float]] = []
-    for mask, score in candidates:
-        suppress = any(
-            (mask & km).sum() / max((mask | km).sum(), 1) > nms_thresh
-            for km, _ in kept
-        )
-        if not suppress:
-            kept.append((mask, score))
+        if detector is not None:
+            yolo_res = detector.predict(img, conf=conf, verbose=False)[0]
+            boxes = yolo_res.boxes.xyxy.cpu().numpy() if len(yolo_res.boxes) else []
+        else:
+            boxes = [[0, 0, W, H]]  # fallback: full image
 
-    return [{"mask": m, "score": s} for m, s in kept]
+        results = []
+        for box in boxes:
+            x1, y1, x2, y2 = map(float, box[:4])
+            masks, scores, _ = predictor.predict(
+                box=np.array([x1, y1, x2, y2]),
+                multimask_output=True,
+            )
+            best  = int(np.argmax(scores))
+            score = float(scores[best])
+            mask  = masks[best].astype(np.uint8)
+            results.append({"mask": mask, "score": score, "bbox": [x1, y1, x2, y2]})
+
+    results.sort(key=lambda d: -d["score"])
+    return results
 
 
 @app.get("/presegment/{image_id}", response_model=PresegmentResult)
@@ -435,9 +429,9 @@ def presegment(image_id: str):
     H, W  = img.shape[:2]
     color = [255, 60, 60]   # red — AI prediction
 
-    detections = grid_detect(img)
+    detections = detect_and_segment(img)
     if not detections:
-        raise HTTPException(404, f"No high-confidence regions detected in '{image_id}'")
+        return PresegmentResult(segments=[], overlay_b64=to_b64(img, fmt="JPEG"))
 
     composite = img.copy()
     segments  = []

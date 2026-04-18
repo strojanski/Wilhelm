@@ -490,6 +490,7 @@ details summary:hover{color:var(--text)}
     <div class="tab active" data-tab="findings">Findings</div>
     <div class="tab" data-tab="compare">Compare</div>
     <div class="tab" data-tab="report">Report</div>
+    <div class="tab" data-tab="gemma">Gemma</div>
   </div>
 
   <div class="tab-body active" id="tab-findings">
@@ -501,10 +502,13 @@ details summary:hover{color:var(--text)}
   <div class="tab-body" id="tab-report">
     <div class="empty-panel">Analyse a scan, then click<br><strong>Generate Report</strong></div>
   </div>
+  <div class="tab-body" id="tab-gemma">
+    <div class="empty-panel">Analyse a scan to see Gemma export</div>
+  </div>
 </div>
 
 <script>
-const API = 'http://localhost:8000';
+const API = 'http://localhost:8001';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -516,6 +520,8 @@ const S = {
   triage: null,
   detections: [],
   report: null,
+  gemmaCrop: null,
+  gemmaPrompt: null,
   // bbox draw state
   drawing: false,
   drawStart: null,
@@ -609,6 +615,7 @@ async function analyse(){
     document.getElementById('tab-findings').innerHTML='<div class="empty-panel">Analysing…</div>';
     document.getElementById('tab-compare').innerHTML='<div class="empty-panel">Loading…</div>';
     document.getElementById('tab-report').innerHTML='<div class="empty-panel">Waiting for analysis…</div>';
+    document.getElementById('tab-gemma').innerHTML='<div class="empty-panel">Analysing…</div>';
 
     const [classifyRes, aiRes, gtRes] = await Promise.allSettled([
       post('/classify', {image_id: id}),
@@ -637,6 +644,14 @@ async function analyse(){
     renderCompare(gtRes.status==='fulfilled' ? gtRes.value : null);
     renderReportTab();
 
+    // Seed Gemma tab with best detection crop
+    if(aiRes.status==='fulfilled' && aiRes.value.segments.length){
+      const best = aiRes.value.segments.reduce((a,b)=>a.iou_score>b.iou_score?a:b);
+      renderGemmaTab(best.crop_b64 ?? best.gemma_context?.crop_b64 ?? null);
+    } else {
+      renderGemmaTab(null);
+    }
+
     if(S.aiOverlay) await applyOverlay(S.aiOverlay);
     if(S.aiMaskB64 && S.gtMaskB64) computeIoU();
 
@@ -649,7 +664,7 @@ function resetState(id){
   S.imageId=id;
   S.aiOverlay=S.gtOverlay=S.probeOverlay=null;
   S.aiMaskB64=S.gtMaskB64=null;
-  S.triage=null; S.detections=[]; S.report=null;
+  S.triage=null; S.detections=[]; S.report=null; S.gemmaCrop=null; S.gemmaPrompt=null;
   S.drawing=false; S.drawStart=null; S.drawRect=null;
   S.view='ai';
   document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.view==='ai'));
@@ -954,6 +969,7 @@ wrap.addEventListener('mouseup', async e=>{
     document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.view==='probe'));
     document.getElementById('btn-probe-view').style.display='flex';
     renderProbeCard(res);
+    renderGemmaTab(res.crop_b64 || null);
     switchTab('findings');
   }catch(e){ alert('Probe failed: '+e.message); }
   spin(false);
@@ -985,6 +1001,61 @@ function renderProbeCard(res){
       </div>
     </div>`;
   panel.insertBefore(card, panel.firstChild);
+}
+
+// ── Gemma tab ─────────────────────────────────────────────────────────────────
+function buildGemmaPrompt(){
+  const p = S.patient;
+  const age      = p.age ? `${p.age}-year-old` : '';
+  const sex      = p.sex || '';
+  const complaint= p.complaint ? `. Chief complaint: ${p.complaint}` : '';
+  const comorbid = p.comorbidities.length ? ` Comorbidities: ${p.comorbidities.join(', ')}.` : '';
+  const meds     = p.medications.length   ? ` Medications: ${p.medications.join(', ')}.`     : '';
+  const triage   = S.triage ? ` AI triage: ${S.triage.urgency?.toUpperCase()}.` : '';
+  const ndet     = S.detections.length;
+  return [
+    'You are a radiology AI assistant. Analyse the attached X-ray crop for fractures.',
+    '',
+    `Patient: ${[age, sex].filter(Boolean).join(' ')}${complaint}.${comorbid}${meds}${triage}`,
+    `SAM-Med2D detected ${ndet} region(s) of interest.`,
+    '',
+    'Provide:',
+    '1. FINDINGS — describe the detected region',
+    '2. IMPRESSION — most likely diagnosis',
+    '3. RECOMMENDATION — next clinical steps',
+  ].join('\n');
+}
+
+function renderGemmaTab(crop_b64){
+  S.gemmaCrop   = crop_b64 || null;
+  S.gemmaPrompt = buildGemmaPrompt();
+  const panel = document.getElementById('tab-gemma');
+  panel.innerHTML='';
+  const card = el('div','card');
+  card.innerHTML=`
+    <div class="badge ai">🤖 Gemma Export</div>
+    ${crop_b64
+      ? `<div style="margin-bottom:10px">
+           <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Region crop</div>
+           <img src="data:image/jpeg;base64,${crop_b64}" style="width:100%;border-radius:4px;margin-bottom:6px">
+           <button class="btn-sm" onclick="downloadCrop()">⬇ Download crop</button>
+         </div><div class="divider"></div>`
+      : `<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">No crop available — draw a bbox probe to get one.</div>`}
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Prompt for Gemma</div>
+    <div class="prompt-box" style="margin-bottom:8px;white-space:pre-wrap">${S.gemmaPrompt}</div>
+    <button class="btn-sm" onclick="copyPrompt()">📋 Copy prompt</button>`;
+  panel.appendChild(card);
+}
+
+function copyPrompt(){
+  if(S.gemmaPrompt) navigator.clipboard.writeText(S.gemmaPrompt);
+}
+function downloadCrop(){
+  if(!S.gemmaCrop) return;
+  const a=document.createElement('a');
+  a.href='data:image/jpeg;base64,'+S.gemmaCrop;
+  a.download=`crop_${S.imageId||'scan'}.jpg`;
+  a.click();
 }
 
 // ── Canvas helpers ────────────────────────────────────────────────────────────
