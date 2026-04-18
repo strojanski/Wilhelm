@@ -1,0 +1,49 @@
+{
+  "image_id": "IMG0000282",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.3229,
+    "prob_fracture": 0.6771,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        295,
+        193,
+        329,
+        215
+      ],
+      "yolo_conf": 0.6322,
+      "sam_score": 0.7891,
+      "mask_path": "masks/IMG0000282_det0.png"
+    },
+    {
+      "det_id": 1,
+      "yolo_bbox": [
+        129,
+        173,
+        158,
+        192
+      ],
+      "yolo_conf": 0.5633,
+      "sam_score": 0.7956,
+      "mask_path": "masks/IMG0000282_det1.png"
+    },
+    {
+      "det_id": 2,
+      "yolo_bbox": [
+        155,
+        182,
+        171,
+        197
+      ],
+      "yolo_conf": 0.3536,
+      "sam_score": 0.7925,
+      "mask_path": "masks/IMG0000282_det2.png"
+    }
+  ]
+}

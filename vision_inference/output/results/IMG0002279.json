@@ -1,0 +1,37 @@
+{
+  "image_id": "IMG0002279",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.234,
+    "prob_fracture": 0.766,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        53,
+        226,
+        90,
+        260
+      ],
+      "yolo_conf": 0.7478,
+      "sam_score": 0.7905,
+      "mask_path": "masks/IMG0002279_det0.png"
+    },
+    {
+      "det_id": 1,
+      "yolo_bbox": [
+        276,
+        229,
+        316,
+        255
+      ],
+      "yolo_conf": 0.6863,
+      "sam_score": 0.7883,
+      "mask_path": "masks/IMG0002279_det1.png"
+    }
+  ]
+}

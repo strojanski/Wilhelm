@@ -1,0 +1,25 @@
+{
+  "image_id": "IMG0000515",
+  "split": "",
+  "has_fracture_gt": false,
+  "classifier": {
+    "prob_normal": 0.824,
+    "prob_fracture": 0.176,
+    "predicted_fracture": true,
+    "threshold": 0.0853
+  },
+  "detections": [
+    {
+      "det_id": 0,
+      "yolo_bbox": [
+        274,
+        118,
+        293,
+        139
+      ],
+      "yolo_conf": 0.3425,
+      "sam_score": 0.778,
+      "mask_path": "masks/IMG0000515_det0.png"
+    }
+  ]
+}
