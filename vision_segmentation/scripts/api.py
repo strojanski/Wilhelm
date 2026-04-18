@@ -31,9 +31,10 @@ from pydantic import BaseModel
 
 DATA_DIR            = Path("../data/FracAtlas")
 CHECKPOINT          = Path("../SAM-Med2D/sam-med2d_b.pth")
-DETECTOR_CHECKPOINT = Path("../data/FracAtlas/detector_runs/fracture_det/weights/best.pt")
+DETECTOR_CHECKPOINT = Path("../weights/best.pt")
 COCO_JSON           = DATA_DIR / "Annotations/COCO JSON/COCO_fracture_masks.json"
 META_CSV            = DATA_DIR / "dataset.csv"
+SPLIT_DIR           = DATA_DIR / "Utilities/Fracture Split"
 IMG_DIRS            = [DATA_DIR / "images/Fractured", DATA_DIR / "images/Non_fractured"]
 DEVICE              = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -49,15 +50,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-predictor  = None
-detector   = None   # YOLOv8 fracture detector (loaded after training)
-meta_df    = None
-coco_index = None   # stem → {H, W, anns:[{id, bbox, segmentation}]}
+predictor   = None
+detector    = None   # YOLOv8 fracture detector (loaded after training)
+meta_df     = None
+coco_index  = None   # stem → {H, W, anns:[{id, bbox, segmentation}]}
+split_index = {}     # stem → "train" | "val" | "test"
 
 
 @app.on_event("startup")
 def load_resources():
-    global predictor, detector, meta_df, coco_index
+    global predictor, detector, meta_df, coco_index, split_index
 
     from segment_anything import sam_model_registry
     from segment_anything.predictor_sammed import SammedPredictor
@@ -82,6 +84,15 @@ def load_resources():
 
     if META_CSV.exists():
         meta_df = pd.read_csv(META_CSV, index_col="image_id")
+
+    for split_name in ["train", "valid", "test"]:
+        p = SPLIT_DIR / f"{split_name}.csv"
+        if p.exists():
+            key = "val" if split_name == "valid" else split_name
+            for line in p.read_text().splitlines()[1:]:
+                stem = Path(line.strip()).stem
+                if stem:
+                    split_index[stem] = key
 
     if COCO_JSON.exists():
         with open(COCO_JSON) as f:
@@ -297,11 +308,12 @@ def health():
 
 @app.get("/images")
 def list_images():
-    stems = []
+    images = []
     for d in IMG_DIRS:
         if d.exists():
-            stems.extend(p.stem for p in sorted(d.glob("*.jpg")))
-    return {"image_ids": stems, "count": len(stems)}
+            for p in sorted(d.glob("*.jpg")):
+                images.append({"id": p.stem, "split": split_index.get(p.stem, "")})
+    return {"images": images, "count": len(images)}
 
 
 @app.get("/image/{image_id}")
@@ -438,11 +450,19 @@ def presegment(image_id: str):
     for i, det in enumerate(detections):
         mask = det["mask"]
         composite = build_overlay(composite, mask, color, alpha=0.35)
+        # Draw YOLO bbox rectangle on composite
+        x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
+        thick = max(2, H // 400)
+        cv2.rectangle(composite, (x1, y1), (x2, y2), tuple(color), thick)
+        label = f"det {i+1}  {det['score']:.2f}"
+        cv2.putText(composite, label, (x1, max(y1 - 6, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, max(0.4, H / 3000), tuple(color), 1, cv2.LINE_AA)
         ys, xs = np.where(mask)
-        bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) else [0, 0, W, H]
+        mask_bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) else [x1, y1, x2, y2]
         segments.append({
             "ann_id":    i,
-            "bbox":      bbox,
+            "bbox":      mask_bbox,
+            "yolo_bbox": [x1, y1, x2, y2],
             "mask_b64":  mask_to_b64(mask),
             "iou_score": round(det["score"], 4),
             "crop_b64":  crop_b64_from_mask(img, mask),
@@ -452,6 +472,48 @@ def presegment(image_id: str):
         segments=segments,
         overlay_b64=to_b64(composite, fmt="JPEG"),
     )
+
+
+@app.get("/presegment_gt/{image_id}", response_model=PresegmentResult)
+def presegment_gt(image_id: str):
+    """Demo endpoint: SAM-Med2D prompted with GT bboxes. For demo use only."""
+    if not predictor:
+        raise HTTPException(503, "Model not loaded")
+
+    img_path = find_image(image_id)
+    if not img_path:
+        raise HTTPException(404, f"Image '{image_id}' not found")
+    if not coco_index or image_id not in coco_index:
+        raise HTTPException(404, f"No GT annotations for '{image_id}'")
+
+    img   = np.array(Image.open(img_path).convert("RGB"))
+    H, W  = img.shape[:2]
+    color = [255, 60, 60]
+    anns  = coco_index[image_id]["anns"]
+
+    composite = img.copy()
+    segments  = []
+    with torch.no_grad():
+        predictor.set_image(img)
+        for i, ann in enumerate(anns):
+            masks, scores, _ = predictor.predict(
+                box=np.array(ann["bbox"], dtype=float),
+                multimask_output=True,
+            )
+            best  = int(np.argmax(scores))
+            mask  = masks[best].astype(np.uint8)
+            composite = build_overlay(composite, mask, color, alpha=0.35)
+            ys, xs = np.where(mask)
+            bbox = [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())] if len(xs) else [0,0,W,H]
+            segments.append({
+                "ann_id":    i,
+                "bbox":      bbox,
+                "mask_b64":  mask_to_b64(mask),
+                "iou_score": round(float(scores[best]), 4),
+                "crop_b64":  crop_b64_from_mask(img, mask),
+            })
+
+    return PresegmentResult(segments=segments, overlay_b64=to_b64(composite, fmt="JPEG"))
 
 
 @app.get("/gt_overlay/{image_id}")

@@ -354,7 +354,7 @@ details summary:hover{color:var(--text)}
         <div class="ob-icon">🤖</div>
         <div class="ob-text">
           <h3>Step 2 — AI triages and segments</h3>
-          <p>The classifier assesses urgency. YOLOv8 detects fracture regions, SAM-Med2D segments each one precisely. Compare AI findings with radiologist ground truth.</p>
+          <p>The classifier assesses urgency. SAM-Med2D automatically detects and segments fracture regions — zero-shot, no prompting required. Compare AI findings with radiologist ground truth.</p>
         </div>
       </div>
       <div class="ob-step">
@@ -373,6 +373,7 @@ details summary:hover{color:var(--text)}
 <header>
   <div class="logo">Radi<span>AI</span></div>
   <div class="tagline">Bone fracture triage · SAM-Med2D</div>
+  <div style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:.5px">DEMO MODE</div>
   <div class="flare-badge">
     <div class="flare-dot"></div>
     🔒 Flare Secure Enclave
@@ -548,10 +549,7 @@ const dCtx = drawCanvas.getContext('2d');
   }
   const imgs = await get('/images');
   const sel = document.getElementById('img-select');
-  const SPLIT_LABELS = {train:'[train]', val:'[val]', test:'[test]', '':''};
-  sel.innerHTML = imgs.images.map(({id, split})=>
-    `<option value="${id}">${id}${split ? '  '+SPLIT_LABELS[split] : ''}</option>`
-  ).join('');
+  sel.innerHTML = imgs.image_ids.map(id=>`<option>${id}</option>`).join('');
 })();
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -622,7 +620,7 @@ async function analyse(){
 
     const [classifyRes, aiRes, gtRes] = await Promise.allSettled([
       post('/classify', {image_id: id}),
-      get(`/presegment/${id}`),
+      get(`/presegment_gt/${id}`),
       img.fractured ? get(`/gt_overlay/${id}`) : Promise.reject('no gt'),
     ]);
 
@@ -711,9 +709,9 @@ function renderFindings(aiData, imgMeta){
   }
 
   const hdr = el('div','card ai');
-  hdr.innerHTML=`<div class="badge ai">🔴 YOLOv8 + SAM-Med2D — ${aiData.segments.length} region${aiData.segments.length>1?'s':''} detected</div>
+  hdr.innerHTML=`<div class="badge ai">🔴 SAM-Med2D — ${aiData.segments.length} region${aiData.segments.length>1?'s':''} detected</div>
     <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
-      YOLOv8 localises fracture regions · SAM-Med2D segments each detection.
+      Zero-shot detection using a dense point grid. No ground-truth prompts used.
     </div>`;
   panel.appendChild(hdr);
 
@@ -1020,7 +1018,7 @@ function buildGemmaPrompt(){
     'You are a radiology AI assistant. Analyse the attached X-ray crop for fractures.',
     '',
     `Patient: ${[age, sex].filter(Boolean).join(' ')}${complaint}.${comorbid}${meds}${triage}`,
-    `YOLOv8 + SAM-Med2D detected ${ndet} region(s) of interest.`,
+    `SAM-Med2D detected ${ndet} region(s) of interest.`,
     '',
     'Provide:',
     '1. FINDINGS — describe the detected region',
