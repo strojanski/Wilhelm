@@ -1,5 +1,6 @@
 package nakljucnadrevesa.wilhelm.service
 
+import com.fasterxml.jackson.annotation.JsonProperty
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.readValue
 import nakljucnadrevesa.wilhelm.dto.CreateVisitRequest
@@ -31,6 +32,19 @@ import java.time.LocalDate
 enum class DocumentType {
     TRIAGE, REPORT, XRAY
 }
+
+private data class AiSegment(
+    @JsonProperty("ann_id")    val annId: Int,
+    @JsonProperty("bbox")      val bbox: List<Int>,
+    @JsonProperty("iou_score") val iouScore: Double,
+    @JsonProperty("mask_b64")  val maskB64: String? = null,
+)
+
+private data class AiResponse(
+    @JsonProperty("segments")           val segments: List<AiSegment>,
+    @JsonProperty("prob_fracture")      val probFracture: Double = 0.0,
+    @JsonProperty("predicted_fracture") val predictedFracture: Boolean = false,
+)
 
 @Service
 class VisitService(
@@ -123,24 +137,20 @@ class VisitService(
         val body = mapOf("image_url" to imageUrl)
         val entity = HttpEntity(body, headers)
 
-        val response = try {
-            rest.postForObject("$aiApiUrl/analyze-url", entity, Map::class.java)
+        val aiResponse = try {
+            rest.postForObject("$aiApiUrl/analyze-url", entity, AiResponse::class.java)
                 ?: throw DocumentStorageException("Empty response from AI API")
         } catch (ex: Exception) {
             throw DocumentStorageException("Failed to call AI API: ${ex.message}", ex)
         }
 
-        @Suppress("UNCHECKED_CAST")
-        val rawSegments = (response["segments"] as? List<Map<String, Any>>) ?: emptyList()
-
-        val segments = rawSegments.map { s ->
-            @Suppress("UNCHECKED_CAST")
+        val segments = aiResponse.segments.map { s ->
             FractureSegment(
-                annId         = (s["ann_id"] as? Int) ?: 0,
-                bbox          = ((s["bbox"] as? List<Number>) ?: emptyList()).map { it.toInt() },
-                iouScore      = ((s["iou_score"] as? Number) ?: 0.0).toDouble(),
+                annId         = s.annId,
+                bbox          = s.bbox,
+                iouScore      = s.iouScore,
                 userCorrected = false,
-                maskB64       = s["mask_b64"] as? String,
+                maskB64       = s.maskB64,
             )
         }
 

@@ -169,5 +169,4 @@ def analyze_url(req: AnalyzeUrlRequest):
         raise HTTPException(status_code=400, detail=f"Invalid image: {e}")
 
     result = _run_inference(img, filename)
-    print(result.model_dump_json(indent=2, exclude={"segments": {"__all__": {"mask_b64"}}}))
     return result

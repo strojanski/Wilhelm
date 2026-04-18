@@ -122,50 +122,55 @@ export default function XrayDetailPage() {
     canvas.height = displayH;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, displayW, displayH);
-    const sx = displayW / nw, sy = displayH / nh;
+
+    // Compute the actual rendered image rect inside the object-contain container
+    const scale = Math.min(displayW / nw, displayH / nh);
+    const rendW = nw * scale;
+    const rendH = nh * scale;
+    const offX = (displayW - rendW) / 2;
+    const offY = (displayH - rendH) / 2;
+    const sx = rendW / nw, sy = rendH / nh;
 
     if (showOverlay) {
       segments.forEach((seg, idx) => {
         const [x1, y1, x2, y2] = seg.bbox;
-        const rx = x1 * sx, ry = y1 * sy, rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
+        const rx = offX + x1 * sx, ry = offY + y1 * sy, rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
         const isSelected = selectedSeg === idx;
         const border = seg.userCorrected ? USER_BORDER : FRACTURE_BORDER;
-        const [r, g, b] = seg.userCorrected ? [255, 200, 0] : [255, 60, 60];
+        const fillColor = seg.userCorrected ? USER_COLOR : FRACTURE_COLOR;
         const maskImg = maskImagesRef.current.get(seg.annId);
 
         if (maskImg) {
-          // Recolor SAM mask pixels → fracture/user color via offscreen canvas
+          // The SAM mask is a grayscale opaque PNG — convert brightness to alpha.
+          // Draw only within the rendered image area (respects object-contain offsets).
           const offscreen = document.createElement('canvas');
-          offscreen.width = nw;
-          offscreen.height = nh;
+          offscreen.width = rendW;
+          offscreen.height = rendH;
           const offCtx = offscreen.getContext('2d')!;
-          offCtx.drawImage(maskImg, 0, 0, nw, nh);
-          const pixels = offCtx.getImageData(0, 0, nw, nh);
+          offCtx.drawImage(maskImg, 0, 0, rendW, rendH);
+          const pixels = offCtx.getImageData(0, 0, rendW, rendH);
+          const [r, g, b] = seg.userCorrected ? [255, 200, 0] : [255, 60, 60];
+          const alpha = isSelected ? 180 : 120;
           for (let i = 0; i < pixels.data.length; i += 4) {
-            if (pixels.data[i] > 128) {
-              pixels.data[i]     = r;
-              pixels.data[i + 1] = g;
-              pixels.data[i + 2] = b;
-              pixels.data[i + 3] = isSelected ? 180 : 120;
-            } else {
-              pixels.data[i + 3] = 0;
-            }
+            const brightness = pixels.data[i];
+            pixels.data[i]     = r;
+            pixels.data[i + 1] = g;
+            pixels.data[i + 2] = b;
+            pixels.data[i + 3] = brightness > 128 ? alpha : 0;
           }
           offCtx.putImageData(pixels, 0, 0);
-          ctx.drawImage(offscreen, 0, 0, displayW, displayH);
+          ctx.drawImage(offscreen, offX, offY);
         } else {
-          // Fallback bbox fill (user-drawn regions / mask not yet loaded)
-          ctx.fillStyle = seg.userCorrected ? USER_COLOR : FRACTURE_COLOR;
+          // Fallback bbox fill (user-drawn regions without a mask)
+          ctx.fillStyle = fillColor;
           ctx.fillRect(rx, ry, rw, rh);
         }
 
-        // Outline: draw bbox only when no mask (user-drawn) or selected
+        // Outline bbox for selected or user-drawn segments
         if (!maskImg || isSelected) {
           ctx.strokeStyle = border;
           ctx.lineWidth = isSelected ? 3 : 1.5;
-          ctx.setLineDash([]);
           ctx.strokeRect(rx, ry, rw, rh);
-          ctx.setLineDash([]);
         }
 
         // Label
@@ -184,7 +189,7 @@ export default function XrayDetailPage() {
     if (drawing) {
       ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]);
-      ctx.strokeRect(drawing.x1 * sx, drawing.y1 * sy, (drawing.x2 - drawing.x1) * sx, (drawing.y2 - drawing.y1) * sy);
+      ctx.strokeRect(offX + drawing.x1 * sx, offY + drawing.y1 * sy, (drawing.x2 - drawing.x1) * sx, (drawing.y2 - drawing.y1) * sy);
       ctx.setLineDash([]);
     }
   }, [segments, showOverlay, drawing, mode, selectedSeg, imgNaturalSize]);
@@ -194,7 +199,14 @@ export default function XrayDetailPage() {
   const toImgCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const r = canvasRef.current!.getBoundingClientRect();
     const { w: nw, h: nh } = imgNaturalSize!;
-    return { x: ((e.clientX - r.left) / r.width) * nw, y: ((e.clientY - r.top) / r.height) * nh };
+    const displayW = r.width, displayH = r.height;
+    const scale = Math.min(displayW / nw, displayH / nh);
+    const offX = (displayW - nw * scale) / 2;
+    const offY = (displayH - nh * scale) / 2;
+    return {
+      x: ((e.clientX - r.left) - offX) / scale,
+      y: ((e.clientY - r.top)  - offY) / scale,
+    };
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -331,14 +343,15 @@ export default function XrayDetailPage() {
             )}
 
             {/* image */}
-            <div className="bg-black overflow-hidden">
-              <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.15s ease' }}>
-                <div className="relative select-none">
+            <div className="bg-black overflow-auto" style={{ height: '420px' }}>
+              <div className="relative select-none"
+                style={{ width: `${zoom * 100}%`, minHeight: `${zoom * 420}px` }}>
                   <img
                     ref={imgRef}
                     src={imgUrl}
                     alt={decodedFilename}
-                    className="block w-full max-h-[420px] object-contain"
+                    className="block w-full object-contain"
+                    style={{ height: `${zoom * 420}px` }}
                     onLoad={(e) => {
                       const el = e.currentTarget;
                       setImgNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
@@ -369,7 +382,6 @@ export default function XrayDetailPage() {
                     </div>
                   )}
                 </div>
-              </div>
             </div>
 
             {/* segment chips */}
