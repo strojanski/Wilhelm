@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>RadiAI — AI Radiology Triage</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0b0b12;
+  --surface:#12121c;
+  --surface2:#181826;
+  --border:#1e1e30;
+  --text:#dde0f0;
+  --text-dim:#5a5c78;
+  --accent:#4f72ff;
+  --red:#ff3f52;
+  --green:#1fd87a;
+  --yellow:#ffbb33;
+  --blue:#3fa8ff;
+  --radius:8px;
+}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Segoe UI',system-ui,sans-serif;
+  font-size:13px;
+  height:100vh;
+  display:grid;
+  grid-template-rows:52px 1fr;
+  grid-template-columns:300px 1fr 340px;
+  overflow:hidden;
+}
+
+/* ── Header ── */
+header{
+  grid-column:1/-1;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:0 18px;
+  z-index:10;
+}
+.logo{font-size:17px;font-weight:800;color:#fff;letter-spacing:-.5px}
+.logo span{color:var(--accent)}
+.tagline{font-size:11px;color:var(--text-dim)}
+
+.flare-badge{
+  display:flex;align-items:center;gap:7px;
+  background:#0d1a0d;
+  border:1px solid #1a3a1a;
+  border-radius:20px;
+  padding:4px 12px;
+  font-size:11px;
+  color:#6adf9a;
+  cursor:default;
+  position:relative;
+}
+.flare-badge:hover .flare-tooltip{display:block}
+.flare-dot{width:7px;height:7px;border-radius:50%;background:#1fd87a;box-shadow:0 0 8px #1fd87a88;flex-shrink:0}
+.flare-tooltip{
+  display:none;
+  position:absolute;
+  top:calc(100% + 8px);
+  left:50%;transform:translateX(-50%);
+  background:#0d1a0d;
+  border:1px solid #2a4a2a;
+  border-radius:6px;
+  padding:8px 12px;
+  font-size:11px;
+  color:#8ee8b0;
+  white-space:nowrap;
+  z-index:50;
+}
+
+.status-pill{
+  margin-left:auto;
+  display:flex;align-items:center;gap:6px;
+  background:var(--surface2);
+  border:1px solid var(--border);
+  border-radius:20px;
+  padding:4px 10px;
+  font-size:11px;
+  color:var(--text-dim);
+}
+.status-dot{width:7px;height:7px;border-radius:50%;background:#333}
+.status-dot.ok{background:var(--green);box-shadow:0 0 8px #1fd87a66}
+.status-dot.err{background:var(--red)}
+.status-dot.loading{background:var(--yellow);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── Sidebar ── */
+aside{
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+
+.sidebar-section{
+  padding:14px;
+  border-bottom:1px solid var(--border);
+}
+.sidebar-section-title{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.9px;
+  color:var(--text-dim);
+  margin-bottom:10px;
+  font-weight:600;
+}
+
+/* form controls */
+.form-row{display:flex;gap:8px;margin-bottom:8px}
+.form-row>*{flex:1}
+label{display:block;font-size:10px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.6px}
+input[type=text],input[type=number],select,textarea{
+  width:100%;
+  background:var(--surface2);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:7px 9px;
+  font-size:12px;
+  font-family:inherit;
+}
+input[type=number]{width:100%}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--accent)}
+textarea{resize:none;height:52px;line-height:1.5}
+
+.chip-group{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.chip{
+  padding:4px 10px;border-radius:20px;font-size:11px;
+  border:1.5px solid var(--border);
+  cursor:pointer;color:var(--text-dim);
+  background:var(--surface2);
+  transition:all .15s;
+}
+.chip.on{border-color:var(--accent);color:#a0b8ff;background:#111830}
+
+button{
+  background:var(--surface2);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:8px 12px;
+  font-size:12px;
+  cursor:pointer;
+  transition:background .15s,border-color .15s;
+  width:100%;
+  font-family:inherit;
+}
+button:hover{background:#1e1e34;border-color:#3344aa}
+.btn-accent{background:#1a2870;color:#a0b8ff;border-color:var(--accent);font-weight:700}
+.btn-accent:hover{background:#1f3290}
+.btn-sm{padding:5px 10px;font-size:11px;width:auto}
+
+/* ── Main canvas ── */
+main{
+  position:relative;
+  background:#07070f;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.canvas-area{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  overflow:hidden;
+}
+#canvas-wrap{
+  position:relative;
+  display:none;
+  border-radius:4px;
+  overflow:hidden;
+  box-shadow:0 0 40px #0008;
+}
+canvas{display:block}
+#overlay-canvas{position:absolute;top:0;left:0;pointer-events:none}
+#draw-canvas{position:absolute;top:0;left:0;pointer-events:none}
+
+#empty-state{text-align:center;color:var(--text-dim);max-width:280px}
+#empty-state .icon{font-size:48px;margin-bottom:12px;opacity:.25}
+#empty-state h2{font-size:15px;color:var(--text);margin-bottom:6px}
+#empty-state p{font-size:12px;line-height:1.6}
+
+.view-toolbar{
+  background:var(--surface);
+  border-top:1px solid var(--border);
+  padding:7px 14px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-shrink:0;
+}
+.view-btn{
+  width:auto;padding:5px 12px;font-size:11px;border-radius:20px;
+  display:flex;align-items:center;gap:5px;
+}
+.view-btn .sw{width:8px;height:8px;border-radius:50%}
+.view-btn.active{border-color:var(--accent);color:#a0b8ff;background:#111830}
+
+.iou-wrap{
+  margin-left:auto;display:flex;align-items:center;gap:8px;
+  font-size:11px;color:var(--text-dim);
+}
+.iou-val{font-weight:800;font-size:15px}
+
+.hint-bar{
+  background:#0d0f1a;
+  border-top:1px solid var(--border);
+  padding:5px 14px;
+  font-size:11px;color:var(--text-dim);
+  flex-shrink:0;
+  display:none;
+}
+.hint-bar.visible{display:block}
+
+#spinner{
+  display:none;position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  width:36px;height:36px;
+  border:3px solid #222;border-top-color:var(--accent);
+  border-radius:50%;animation:spin .7s linear infinite;z-index:5;
+}
+@keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+
+/* ── Right panel ── */
+.right{
+  background:var(--surface);
+  border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{
+  flex:1;padding:11px 4px;text-align:center;font-size:11px;
+  cursor:pointer;color:var(--text-dim);
+  border-bottom:2px solid transparent;transition:color .15s;
+}
+.tab.active{color:#a0b8ff;border-bottom-color:var(--accent)}
+.tab-body{display:none;flex-direction:column;gap:10px;padding:12px;overflow-y:auto;flex:1}
+.tab-body.active{display:flex}
+
+.card{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--radius);padding:12px;
+}
+.card.ai{border-left:3px solid var(--red)}
+.card.gt{border-left:3px solid var(--green)}
+.card.probe{border-left:3px solid var(--blue)}
+.card.urgent{border-left:3px solid var(--red);background:#160a0b}
+.card.safe{border-left:3px solid var(--green);background:#0a160d}
+.card.report{border-left:3px solid var(--accent)}
+
+.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  border-radius:4px;padding:3px 8px;font-size:10px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  margin-bottom:8px;
+}
+.badge.ai{background:#1f060a;border:1px solid #aa1122;color:#ff5566}
+.badge.gt{background:#061a0d;border:1px solid #115533;color:#33ee88}
+.badge.probe{background:#061220;border:1px solid #1144aa;color:#55aaff}
+.badge.urgent{background:#2a0006;border:1px solid #880011;color:#ff4455;font-size:12px}
+.badge.safe{background:#002208;border:1px solid #116633;color:#33ee88;font-size:12px}
+.badge.report{background:#060d2a;border:1px solid #2244bb;color:#7799ff}
+
+.conf-row{display:flex;align-items:center;gap:8px;margin:8px 0}
+.conf-num{font-size:24px;font-weight:800}
+.conf-bar-wrap{flex:1;height:5px;background:#1a1a2a;border-radius:3px;overflow:hidden}
+.conf-bar{height:100%;border-radius:3px;transition:width .5s}
+.conf-label{font-size:10px;color:var(--text-dim)}
+
+.meta-row{display:flex;justify-content:space-between;font-size:11px;margin:3px 0}
+.meta-row span:first-child{color:var(--text-dim)}
+.meta-row span:last-child{color:var(--text);font-weight:500}
+.divider{height:1px;background:var(--border);margin:6px 0}
+
+.empty-panel{color:var(--text-dim);font-size:12px;text-align:center;padding:28px 12px;line-height:1.8}
+
+.report-section{margin-bottom:14px}
+.report-label{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim);margin-bottom:5px}
+.report-text{font-size:12px;line-height:1.7;color:var(--text)}
+.prompt-box{
+  background:#07090f;border:1px solid #1a1e38;border-radius:6px;
+  padding:10px;font-size:11px;color:#6677aa;line-height:1.65;
+  white-space:pre-wrap;word-break:break-word;
+  max-height:160px;overflow-y:auto;
+}
+details summary{
+  font-size:11px;color:var(--text-dim);cursor:pointer;padding:4px 0;
+  user-select:none;
+}
+details summary:hover{color:var(--text)}
+
+.legend{display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border)}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-dim)}
+.legend-swatch{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+
+/* ── Onboarding ── */
+#onboarding{
+  position:fixed;inset:0;background:#000d;
+  display:flex;align-items:center;justify-content:center;
+  z-index:100;backdrop-filter:blur(4px);
+}
+.ob-card{
+  background:var(--surface);border:1px solid #2a2a44;
+  border-radius:14px;padding:36px 40px;max-width:540px;width:90%;
+  box-shadow:0 20px 60px #0009;
+}
+.ob-card h1{font-size:21px;font-weight:800;color:#fff;margin-bottom:4px}
+.ob-card .sub{font-size:13px;color:var(--text-dim);margin-bottom:6px;line-height:1.5}
+.ob-privacy{
+  display:flex;align-items:center;gap:8px;
+  background:#0a160a;border:1px solid #1a3a1a;
+  border-radius:8px;padding:10px 14px;margin-bottom:22px;
+  font-size:12px;color:#6adf9a;
+}
+.ob-steps{display:flex;flex-direction:column;gap:14px;margin-bottom:24px}
+.ob-step{display:flex;gap:14px;align-items:flex-start}
+.ob-icon{font-size:20px;flex-shrink:0;margin-top:2px}
+.ob-text h3{font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px}
+.ob-text p{font-size:12px;color:var(--text-dim);line-height:1.5}
+</style>
+</head>
+<body>
+
+<!-- ── Onboarding ── -->
+<div id="onboarding">
+  <div class="ob-card">
+    <h1>🩻 RadiAI</h1>
+    <p class="sub">AI-powered bone fracture triage &amp; reporting</p>
+    <div class="ob-privacy">
+      <span>🔒</span>
+      <span>All analysis runs inside <strong>Flare's confidential compute enclave</strong> — patient imaging data is cryptographically protected. The cloud operator cannot see the scan.</span>
+    </div>
+    <div class="ob-steps">
+      <div class="ob-step">
+        <div class="ob-icon">📋</div>
+        <div class="ob-text">
+          <h3>Step 1 — Enter patient history</h3>
+          <p>Age, sex, comorbidities, medications. This context is used to personalise the clinical report — it never leaves your browser until you generate a report.</p>
+        </div>
+      </div>
+      <div class="ob-step">
+        <div class="ob-icon">🤖</div>
+        <div class="ob-text">
+          <h3>Step 2 — AI triages and segments</h3>
+          <p>The classifier assesses urgency. SAM-Med2D automatically detects and segments fracture regions — zero-shot, no prompting required. Compare AI findings with radiologist ground truth.</p>
+        </div>
+      </div>
+      <div class="ob-step">
+        <div class="ob-icon">📄</div>
+        <div class="ob-text">
+          <h3>Step 3 — Generate clinical report</h3>
+          <p>Get a structured radiology report with findings, impression, and recommendation — contextualised with patient history. Draw a bounding box on the scan to probe any region further.</p>
+        </div>
+      </div>
+    </div>
+    <button class="btn-accent" onclick="document.getElementById('onboarding').style.display='none'">Begin →</button>
+  </div>
+</div>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">Radi<span>AI</span></div>
+  <div class="tagline">Bone fracture triage · SAM-Med2D</div>
+  <div class="flare-badge">
+    <div class="flare-dot"></div>
+    🔒 Flare Secure Enclave
+    <div class="flare-tooltip">Patient data processed in Flare confidential compute.<br>Operator-blind — cryptographic privacy guarantee.</div>
+  </div>
+  <div class="status-pill">
+    <div class="status-dot loading" id="dot"></div>
+    <span id="status-text">connecting…</span>
+  </div>
+</header>
+
+<!-- ── Sidebar ── -->
+<aside>
+  <!-- Patient history -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Patient History</div>
+    <div class="form-row">
+      <div>
+        <label>Age</label>
+        <input type="number" id="pt-age" placeholder="—" min="0" max="120" style="width:100%">
+      </div>
+      <div>
+        <label>Sex</label>
+        <select id="pt-sex">
+          <option value="">—</option>
+          <option>Male</option>
+          <option>Female</option>
+          <option>Other</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label>Chief complaint</label>
+      <textarea id="pt-complaint" placeholder="e.g. pain after fall, unable to bear weight…"></textarea>
+    </div>
+    <div style="margin-bottom:10px">
+      <label>Comorbidities</label>
+      <div class="chip-group" id="comorbid-chips">
+        <span class="chip" data-val="Osteoporosis">Osteoporosis</span>
+        <span class="chip" data-val="Diabetes">Diabetes</span>
+        <span class="chip" data-val="Rheumatoid arthritis">Rheumatoid</span>
+        <span class="chip" data-val="Cancer">Cancer</span>
+      </div>
+    </div>
+    <div>
+      <label>Medications</label>
+      <div class="chip-group" id="med-chips">
+        <span class="chip" data-val="Corticosteroids">Corticosteroids</span>
+        <span class="chip" data-val="Bisphosphonates">Bisphosphonates</span>
+        <span class="chip" data-val="Anticoagulants">Anticoagulants</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scan select -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Scan</div>
+    <select id="img-select" style="margin-bottom:8px"><option>Loading…</option></select>
+    <button class="btn-accent" id="btn-load">Analyse scan →</button>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend" style="margin-top:auto">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--red)"></div>AI detection</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--green)"></div>Radiologist GT</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--blue)"></div>Manual probe</div>
+  </div>
+</aside>
+
+<!-- ── Canvas ── -->
+<main>
+  <div class="canvas-area" id="canvas-area">
+    <div id="empty-state">
+      <div class="icon">🩻</div>
+      <h2>No scan loaded</h2>
+      <p>Fill patient history, select a scan, and click <strong>Analyse</strong>.</p>
+    </div>
+    <div id="canvas-wrap">
+      <canvas id="base-canvas"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+      <canvas id="draw-canvas"></canvas>
+    </div>
+    <div id="spinner"></div>
+  </div>
+
+  <div class="view-toolbar" id="view-toolbar" style="display:none">
+    <span style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.8px;margin-right:2px">View:</span>
+    <button class="view-btn active" data-view="ai" onclick="setView('ai')">
+      <div class="sw" style="background:var(--red)"></div> AI Detection
+    </button>
+    <button class="view-btn" data-view="gt" onclick="setView('gt')">
+      <div class="sw" style="background:var(--green)"></div> Ground Truth
+    </button>
+    <button class="view-btn" data-view="both" onclick="setView('both')">
+      <div class="sw" style="background:var(--red)"></div>
+      <div class="sw" style="background:var(--green)"></div> Compare
+    </button>
+    <button class="view-btn" id="btn-probe-view" data-view="probe" onclick="setView('probe')" style="display:none">
+      <div class="sw" style="background:var(--blue)"></div> Probe
+    </button>
+    <div class="iou-wrap" id="iou-wrap" style="display:none">
+      <span>AI accuracy</span>
+      <span class="iou-val" id="iou-val">—</span>
+    </div>
+  </div>
+
+  <div class="hint-bar" id="hint-bar">
+    Draw a bounding box on the scan to probe any region — drag and release to segment
+  </div>
+</main>
+
+<!-- ── Right panel ── -->
+<div class="right">
+  <div class="tabs">
+    <div class="tab active" data-tab="findings">Findings</div>
+    <div class="tab" data-tab="compare">Compare</div>
+    <div class="tab" data-tab="report">Report</div>
+  </div>
+
+  <div class="tab-body active" id="tab-findings">
+    <div class="empty-panel">Analyse a scan to see AI findings</div>
+  </div>
+  <div class="tab-body" id="tab-compare">
+    <div class="empty-panel">Analyse a scan to compare AI vs radiologist</div>
+  </div>
+  <div class="tab-body" id="tab-report">
+    <div class="empty-panel">Analyse a scan, then click<br><strong>Generate Report</strong></div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const S = {
+  imageId: null,
+  imgW:0, imgH:0, dispW:0, dispH:0, scale:1,
+  view: 'ai',
+  aiOverlay: null, gtOverlay: null, probeOverlay: null,
+  aiMaskB64: null, gtMaskB64: null,
+  triage: null,
+  detections: [],
+  report: null,
+  // bbox draw state
+  drawing: false,
+  drawStart: null,
+  drawRect: null,
+  // patient
+  patient: {age:'', sex:'', complaint:'', comorbidities:[], medications:[]},
+};
+
+const baseCanvas    = document.getElementById('base-canvas');
+const overlayCanvas = document.getElementById('overlay-canvas');
+const drawCanvas    = document.getElementById('draw-canvas');
+const bCtx = baseCanvas.getContext('2d');
+const oCtx = overlayCanvas.getContext('2d');
+const dCtx = drawCanvas.getContext('2d');
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+(async()=>{
+  try{
+    const h = await get('/health');
+    setStatus('ok', `${h.device.toUpperCase()} · ready`);
+  }catch{
+    setStatus('err','API offline — run: uvicorn api:app --port 8000');
+    return;
+  }
+  const imgs = await get('/images');
+  const sel = document.getElementById('img-select');
+  sel.innerHTML = imgs.image_ids.map(id=>`<option>${id}</option>`).join('');
+})();
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function get(p){ const r=await fetch(API+p); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function post(p,b){ const r=await fetch(API+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+function setStatus(cls,msg){
+  document.getElementById('dot').className='status-dot '+cls;
+  document.getElementById('status-text').textContent=msg;
+}
+
+// ── Chip toggles ──────────────────────────────────────────────────────────────
+document.querySelectorAll('#comorbid-chips .chip').forEach(c=>{
+  c.onclick=()=>{ c.classList.toggle('on'); updatePatient(); };
+});
+document.querySelectorAll('#med-chips .chip').forEach(c=>{
+  c.onclick=()=>{ c.classList.toggle('on'); updatePatient(); };
+});
+['pt-age','pt-sex','pt-complaint'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', updatePatient);
+});
+function updatePatient(){
+  S.patient.age       = document.getElementById('pt-age').value;
+  S.patient.sex       = document.getElementById('pt-sex').value;
+  S.patient.complaint = document.getElementById('pt-complaint').value;
+  S.patient.comorbidities = [...document.querySelectorAll('#comorbid-chips .chip.on')].map(c=>c.dataset.val);
+  S.patient.medications   = [...document.querySelectorAll('#med-chips .chip.on')].map(c=>c.dataset.val);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-body').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById('tab-'+t.dataset.tab).classList.add('active');
+  };
+});
+function switchTab(n){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===n));
+  document.querySelectorAll('.tab-body').forEach(t=>t.classList.toggle('active',t.id==='tab-'+n));
+}
+
+// ── Analyse ───────────────────────────────────────────────────────────────────
+document.getElementById('btn-load').onclick = analyse;
+
+async function analyse(){
+  const id = document.getElementById('img-select').value;
+  if(!id) return;
+  updatePatient();
+  spin(true);
+  resetState(id);
+
+  try{
+    const img = await get(`/image/${id}`);
+    S.imgW=img.width; S.imgH=img.height;
+    await drawBase(img.image_b64);
+
+    document.getElementById('empty-state').style.display='none';
+    document.getElementById('canvas-wrap').style.display='block';
+    document.getElementById('view-toolbar').style.display='flex';
+    document.getElementById('hint-bar').classList.add('visible');
+
+    document.getElementById('tab-findings').innerHTML='<div class="empty-panel">Analysing…</div>';
+    document.getElementById('tab-compare').innerHTML='<div class="empty-panel">Loading…</div>';
+    document.getElementById('tab-report').innerHTML='<div class="empty-panel">Waiting for analysis…</div>';
+
+    const [classifyRes, aiRes, gtRes] = await Promise.allSettled([
+      post('/classify', {image_id: id}),
+      get(`/presegment/${id}`),
+      img.fractured ? get(`/gt_overlay/${id}`) : Promise.reject('no gt'),
+    ]);
+
+    // Triage
+    if(classifyRes.status==='fulfilled') S.triage = classifyRes.value;
+
+    // AI detections
+    if(aiRes.status==='fulfilled'){
+      S.aiOverlay  = aiRes.value.overlay_b64;
+      S.detections = aiRes.value.segments;
+      const masks  = aiRes.value.segments.map(s=>s.mask_b64).filter(Boolean);
+      S.aiMaskB64  = masks.length ? await unionMasks(masks) : null;
+    }
+
+    // GT
+    if(gtRes.status==='fulfilled'){
+      S.gtOverlay  = gtRes.value.overlay_b64;
+      S.gtMaskB64  = gtRes.value.mask_b64;
+    }
+
+    renderFindings(aiRes.status==='fulfilled' ? aiRes.value : null, img);
+    renderCompare(gtRes.status==='fulfilled' ? gtRes.value : null);
+    renderReportTab();
+
+    if(S.aiOverlay) await applyOverlay(S.aiOverlay);
+    if(S.aiMaskB64 && S.gtMaskB64) computeIoU();
+
+    switchTab('findings');
+  }catch(e){ alert('Error: '+e.message); }
+  spin(false);
+}
+
+function resetState(id){
+  S.imageId=id;
+  S.aiOverlay=S.gtOverlay=S.probeOverlay=null;
+  S.aiMaskB64=S.gtMaskB64=null;
+  S.triage=null; S.detections=[]; S.report=null;
+  S.drawing=false; S.drawStart=null; S.drawRect=null;
+  S.view='ai';
+  document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.view==='ai'));
+  document.getElementById('iou-wrap').style.display='none';
+  document.getElementById('btn-probe-view').style.display='none';
+}
+
+// ── Render: Findings ──────────────────────────────────────────────────────────
+function renderFindings(aiData, imgMeta){
+  const panel = document.getElementById('tab-findings');
+  panel.innerHTML='';
+
+  // Triage card
+  if(S.triage){
+    const urgent = S.triage.urgency==='high';
+    const pct    = Math.round((S.triage.confidence||0)*100);
+    const card   = el('div','card '+(urgent?'urgent':'safe'));
+    card.innerHTML=`
+      <div class="badge ${urgent?'urgent':'safe'}">${urgent?'⚠ HIGH PRIORITY':'✓ LOW PRIORITY'}</div>
+      <div style="font-size:13px;font-weight:700;color:${urgent?'var(--red)':'var(--green)'};margin-bottom:6px">
+        ${S.triage.anomaly_hint}
+      </div>
+      <div class="conf-row">
+        <div class="conf-num" style="color:${confColor(S.triage.confidence||0)}">${pct}%</div>
+        <div>
+          <div class="conf-bar-wrap"><div class="conf-bar" style="width:${pct}%;background:${confColor(S.triage.confidence||0)}"></div></div>
+          <div class="conf-label">classifier confidence</div>
+        </div>
+      </div>
+      ${S.triage.body_part?.length?`<div class="meta-row"><span>Region</span><span>${S.triage.body_part.join(', ')}</span></div>`:''}
+      ${imgMeta?.hardware_present?'<div class="meta-row"><span style="color:var(--yellow)">⚠ Hardware / implant</span><span>visible</span></div>':''}`;
+    panel.appendChild(card);
+  }
+
+  if(!aiData || !aiData.segments.length){
+    const d=el('div','empty-panel');
+    d.style.color='#555';
+    d.textContent='No anomalies detected in this scan.';
+    panel.appendChild(d);
+    return;
+  }
+
+  const hdr = el('div','card ai');
+  hdr.innerHTML=`<div class="badge ai">🔴 SAM-Med2D — ${aiData.segments.length} region${aiData.segments.length>1?'s':''} detected</div>
+    <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
+      Zero-shot detection using a dense point grid. No ground-truth prompts used.
+    </div>`;
+  panel.appendChild(hdr);
+
+  aiData.segments.forEach((seg,i)=>{
+    const pct  = Math.round(seg.iou_score*100);
+    const card = el('div','card ai');
+    card.style.cursor='pointer';
+    card.innerHTML=`
+      <div style="font-size:11px;font-weight:600;color:#ff7788;margin-bottom:6px">Region ${i+1}</div>
+      ${seg.crop_b64?`<img src="data:image/jpeg;base64,${seg.crop_b64}" style="width:100%;border-radius:4px;margin-bottom:6px">` : `<img src="data:image/png;base64,${seg.mask_b64}" style="width:100%;border-radius:4px;margin-bottom:6px">`}
+      <div class="conf-row">
+        <div class="conf-num" style="color:${confColor(seg.iou_score)}">${pct}%</div>
+        <div>
+          <div class="conf-bar-wrap"><div class="conf-bar" style="width:${pct}%;background:${confColor(seg.iou_score)}"></div></div>
+          <div class="conf-label">SAM-Med2D confidence</div>
+        </div>
+      </div>`;
+    panel.appendChild(card);
+  });
+}
+
+// ── Render: Compare ───────────────────────────────────────────────────────────
+function renderCompare(gtData){
+  const panel = document.getElementById('tab-compare');
+  panel.innerHTML='';
+
+  const infoCard = el('div','card');
+  infoCard.innerHTML=`
+    <div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-bottom:10px">
+      Use the <strong style="color:var(--text)">Compare</strong> view to overlay AI predictions and radiologist annotations simultaneously.<br><br>
+      <span style="color:var(--red)">■</span> Red = AI detected &nbsp; <span style="color:var(--green)">■</span> Green = Radiologist drawn<br>
+      Overlap = agreement. IoU measures pixel-level accuracy.
+    </div>
+    <div id="iou-card-val" style="font-size:11px;color:var(--text-dim)">Load a fractured scan to see IoU.</div>`;
+  panel.appendChild(infoCard);
+
+  if(!gtData){
+    const d=el('div','empty-panel');
+    d.style.color='#555';
+    d.textContent='No radiologist annotations available for this scan.';
+    panel.appendChild(d);
+    return;
+  }
+
+  const gtCard = el('div','card gt');
+  gtCard.innerHTML=`
+    <div class="badge gt">🟢 Radiologist annotations — ${gtData.region_count} region${gtData.region_count>1?'s':''}</div>
+    <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
+      Ground truth masks drawn by expert radiologists from the FracAtlas dataset.
+    </div>`;
+  panel.appendChild(gtCard);
+
+  gtData.regions.forEach((reg,i)=>{
+    const card=el('div','card gt');
+    card.innerHTML=`
+      <div style="font-size:11px;font-weight:600;color:#44ee88;margin-bottom:6px">Annotated region ${i+1}</div>
+      <img src="data:image/png;base64,${reg.mask_b64}" style="width:100%;border-radius:4px">`;
+    panel.appendChild(card);
+  });
+}
+
+// ── Render: Report tab placeholder ───────────────────────────────────────────
+function renderReportTab(){
+  const panel = document.getElementById('tab-report');
+  panel.innerHTML='';
+  const card=el('div','card report');
+  card.innerHTML=`
+    <div class="badge report">📄 Clinical Report</div>
+    <div style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:12px">
+      Generates a structured radiology report contextualised with patient history.
+      ${!S.patient.age && !S.patient.complaint ? '<br><em style="color:#776622">Tip: fill in patient history for a personalised report.</em>' : ''}
+    </div>
+    <button class="btn-accent" onclick="generateReport()">Generate Report →</button>`;
+  panel.appendChild(card);
+}
+
+async function generateReport(){
+  if(!S.imageId) return;
+  const panel = document.getElementById('tab-report');
+  panel.innerHTML='<div class="empty-panel">Generating report…</div>';
+  try{
+    const res = await post('/report',{
+      image_id:   S.imageId,
+      patient:    S.patient,
+      detections: S.detections,
+      triage:     S.triage,
+    });
+    S.report = res.report;
+    renderReport(res);
+    switchTab('report');
+  }catch(e){ alert('Report failed: '+e.message); renderReportTab(); }
+}
+
+function renderReport(res){
+  const r     = res.report;
+  const panel = document.getElementById('tab-report');
+  panel.innerHTML='';
+
+  const card=el('div','card report');
+  const byLabel = r.generated_by==='gemma'
+    ? '<span style="color:var(--green)">✓ Gemma</span>'
+    : '<span style="color:var(--text-dim)">stub — connect Gemma to activate</span>';
+
+  card.innerHTML=`
+    <div class="badge report">📄 Clinical Report</div>
+    <div style="font-size:10px;color:var(--text-dim);margin-bottom:12px">Generated by: ${byLabel}</div>
+    ${r.patient_context?`<div class="report-section"><div class="report-label">Patient</div><div class="report-text" style="color:var(--text-dim)">${r.patient_context}</div></div>`:''}
+    <div class="divider"></div>
+    <div class="report-section"><div class="report-label">Findings</div><div class="report-text">${r.findings}</div></div>
+    <div class="report-section"><div class="report-label">Impression</div><div class="report-text">${r.impression}</div></div>
+    <div class="report-section"><div class="report-label">Recommendation</div><div class="report-text" style="color:var(--yellow)">${r.recommendation}</div></div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn-sm" onclick="copyReport()">📋 Copy</button>
+      <button class="btn-sm" onclick="downloadReport()">⬇ Download .txt</button>
+    </div>
+    <details>
+      <summary>Developer view — Gemma prompt</summary>
+      <div class="prompt-box" style="margin-top:6px">${res.prompt}</div>
+    </details>`;
+  panel.appendChild(card);
+}
+
+function copyReport(){
+  if(!S.report) return;
+  const txt = `FINDINGS\n${S.report.findings}\n\nIMPRESSION\n${S.report.impression}\n\nRECOMMENDATION\n${S.report.recommendation}`;
+  navigator.clipboard.writeText(txt);
+}
+function downloadReport(){
+  if(!S.report) return;
+  const txt = `RADIAI CLINICAL REPORT\n${'─'.repeat(40)}\nPatient: ${S.report.patient_context}\n\nFINDINGS\n${S.report.findings}\n\nIMPRESSION\n${S.report.impression}\n\nRECOMMENDATION\n${S.report.recommendation}\n`;
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(txt);
+  a.download=`radiai_report_${S.imageId||'scan'}.txt`;
+  a.click();
+}
+
+// ── View modes ────────────────────────────────────────────────────────────────
+async function setView(v){
+  S.view=v;
+  document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  document.getElementById('iou-wrap').style.display=(v==='both'&&S.aiMaskB64&&S.gtMaskB64)?'flex':'none';
+
+  if(v==='ai' && S.aiOverlay)          await applyOverlay(S.aiOverlay);
+  else if(v==='gt' && S.gtOverlay)     await applyOverlay(S.gtOverlay);
+  else if(v==='both')                  await applyBothOverlays();
+  else if(v==='probe' && S.probeOverlay) await applyOverlay(S.probeOverlay);
+  else { oCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height); }
+}
+
+async function applyOverlay(b64){
+  return new Promise(res=>{
+    const i=new Image();
+    i.onload=()=>{ oCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height); oCtx.drawImage(i,0,0,S.dispW,S.dispH); res(); };
+    i.src='data:image/jpeg;base64,'+b64;
+  });
+}
+
+async function applyBothOverlays(){
+  if(!S.gtOverlay) return;
+  await applyOverlay(S.gtOverlay);
+  if(!S.aiOverlay) return;
+  const ai=new Image();
+  ai.onload=()=>{ oCtx.globalAlpha=0.6; oCtx.drawImage(ai,0,0,S.dispW,S.dispH); oCtx.globalAlpha=1; };
+  ai.src='data:image/jpeg;base64,'+S.aiOverlay;
+}
+
+// ── IoU ───────────────────────────────────────────────────────────────────────
+async function computeIoU(){
+  const iou = await maskIoU(S.aiMaskB64, S.gtMaskB64);
+  const pct = Math.round(iou*100);
+  const el2 = document.getElementById('iou-val');
+  el2.textContent=pct+'%';
+  el2.style.color=confColor(iou);
+  const ic = document.getElementById('iou-card-val');
+  if(ic) ic.innerHTML=`AI vs Radiologist IoU: <strong style="color:${confColor(iou)};font-size:16px">${pct}%</strong>`;
+}
+
+function maskIoU(aB64,bB64){
+  return new Promise(res=>{
+    const iA=new Image(), iB=new Image(); let done=0;
+    const check=()=>{ if(++done<2) return;
+      const W=iA.width,H=iA.height;
+      const tc=document.createElement('canvas'); tc.width=W; tc.height=H;
+      const ctx=tc.getContext('2d');
+      ctx.drawImage(iA,0,0); const dA=ctx.getImageData(0,0,W,H).data;
+      ctx.clearRect(0,0,W,H);
+      ctx.drawImage(iB,0,0); const dB=ctx.getImageData(0,0,W,H).data;
+      let inter=0,union=0;
+      for(let i=0;i<dA.length;i+=4){ const a=dA[i]>127,b=dB[i]>127; if(a&&b)inter++; if(a||b)union++; }
+      res(union?inter/union:0);
+    };
+    iA.onload=check; iB.onload=check;
+    iA.src='data:image/png;base64,'+aB64;
+    iB.src='data:image/png;base64,'+bB64;
+  });
+}
+
+function unionMasks(b64arr){
+  return new Promise(res=>{
+    if(b64arr.length===1){ res(b64arr[0]); return; }
+    let loaded=0;
+    const imgs=b64arr.map(b=>{ const i=new Image(); i.src='data:image/png;base64,'+b; return i; });
+    const check=()=>{ if(++loaded<imgs.length) return;
+      const W=imgs[0].width,H=imgs[0].height;
+      const tc=document.createElement('canvas'); tc.width=W; tc.height=H;
+      const ctx=tc.getContext('2d');
+      imgs.forEach(img=>ctx.drawImage(img,0,0));
+      const d=ctx.getImageData(0,0,W,H);
+      for(let i=0;i<d.data.length;i+=4){ const v=d.data[i]>0?255:0; d.data[i]=d.data[i+1]=d.data[i+2]=v; d.data[i+3]=v?255:0; }
+      ctx.putImageData(d,0,0);
+      res(tc.toDataURL('image/png').replace('data:image/png;base64,',''));
+    };
+    imgs.forEach(i=>{ if(i.complete) check(); else i.onload=check; });
+  });
+}
+
+// ── Bbox draw ─────────────────────────────────────────────────────────────────
+const wrap = document.getElementById('canvas-wrap');
+
+wrap.addEventListener('mousedown', e=>{
+  if(!S.imageId) return;
+  S.drawing=true;
+  const r=baseCanvas.getBoundingClientRect();
+  S.drawStart={x:e.clientX-r.left, y:e.clientY-r.top};
+  S.drawRect=null;
+});
+
+wrap.addEventListener('mousemove', e=>{
+  if(!S.drawing || !S.drawStart) return;
+  const r=baseCanvas.getBoundingClientRect();
+  const cx=e.clientX-r.left, cy=e.clientY-r.top;
+  S.drawRect={
+    x1:Math.min(S.drawStart.x,cx), y1:Math.min(S.drawStart.y,cy),
+    x2:Math.max(S.drawStart.x,cx), y2:Math.max(S.drawStart.y,cy),
+  };
+  drawBboxRect(S.drawRect);
+});
+
+wrap.addEventListener('mouseup', async e=>{
+  if(!S.drawing) return;
+  S.drawing=false;
+  dCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
+  if(!S.drawRect) return;
+  const {x1,y1,x2,y2}=S.drawRect;
+  if((x2-x1)<8 || (y2-y1)<8) return; // too small, ignore
+
+  // Convert to original image coords
+  const bbox=[x1/S.scale, y1/S.scale, x2/S.scale, y2/S.scale].map(Math.round);
+  spin(true);
+  try{
+    const res = await post('/segment',{image_id:S.imageId, bbox});
+    S.probeOverlay = res.overlay_b64;
+    await applyOverlay(res.overlay_b64);
+    S.view='probe';
+    document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.view==='probe'));
+    document.getElementById('btn-probe-view').style.display='flex';
+    renderProbeCard(res);
+    switchTab('findings');
+  }catch(e){ alert('Probe failed: '+e.message); }
+  spin(false);
+});
+
+function drawBboxRect(r){
+  dCtx.clearRect(0,0,drawCanvas.width,drawCanvas.height);
+  dCtx.strokeStyle='#ffdd44';
+  dCtx.lineWidth=2;
+  dCtx.setLineDash([5,4]);
+  dCtx.strokeRect(r.x1, r.y1, r.x2-r.x1, r.y2-r.y1);
+  dCtx.setLineDash([]);
+}
+
+function renderProbeCard(res){
+  const panel = document.getElementById('tab-findings');
+  // remove previous probe card if any
+  document.querySelectorAll('.probe-card').forEach(c=>c.remove());
+  const pct  = Math.round(res.iou_scores[res.best_index]*100);
+  const card = el('div','card probe probe-card');
+  card.innerHTML=`
+    <div class="badge probe">🔵 Manual probe</div>
+    ${res.crop_b64?`<img src="data:image/jpeg;base64,${res.crop_b64}" style="width:100%;border-radius:4px;margin-bottom:6px">`:''}
+    <div class="conf-row">
+      <div class="conf-num" style="color:${confColor(res.iou_scores[res.best_index])}">${pct}%</div>
+      <div>
+        <div class="conf-bar-wrap"><div class="conf-bar" style="width:${pct}%;background:${confColor(res.iou_scores[res.best_index])}"></div></div>
+        <div class="conf-label">segment confidence</div>
+      </div>
+    </div>`;
+  panel.insertBefore(card, panel.firstChild);
+}
+
+// ── Canvas helpers ────────────────────────────────────────────────────────────
+async function drawBase(b64){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      const area=document.getElementById('canvas-area');
+      const maxW=area.clientWidth-24, maxH=area.clientHeight-72;
+      S.scale=Math.min(maxW/S.imgW, maxH/S.imgH, 1);
+      S.dispW=Math.round(S.imgW*S.scale);
+      S.dispH=Math.round(S.imgH*S.scale);
+      [baseCanvas,overlayCanvas,drawCanvas].forEach(c=>{ c.width=S.dispW; c.height=S.dispH; });
+      bCtx.drawImage(img,0,0,S.dispW,S.dispH);
+      res();
+    };
+    img.src='data:image/jpeg;base64,'+b64;
+  });
+}
+
+function el(tag,cls){ const e=document.createElement(tag); e.className=cls; return e; }
+function spin(on){ document.getElementById('spinner').style.display=on?'block':'none'; }
+function confColor(s){ return s>=.7?'#1fd87a':s>=.4?'#ffbb33':'#ff3f52'; }
+</script>
+</body>
+</html>
