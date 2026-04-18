@@ -1,3 +1,6 @@
+**/.DS_Store
+.idea/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -208,3 +211,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+vision_classifier/medsiglip-448/
+vision_classifier/data/
