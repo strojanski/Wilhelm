@@ -1,0 +1,43 @@
+services:
+  vision-api:
+    build: .
+    working_dir: /app/vision
+    command: uvicorn vision_api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./vision_segmentation/SAM-Med2D:/app/vision_segmentation/SAM-Med2D:ro
+      - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
+    environment:
+      MODEL_ROOT: /app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
+  tee-extension:
+    build: .
+    working_dir: /app/vision
+    command: python main.py
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      VISION_API_URL: http://vision-api:8000
+      TEE_PRIVATE_KEY: ${PRIVATE_KEY:-}
+      EXTENSION_PORT: ${EXTENSION_PORT:-8080}
+      SIGN_PORT: ${SIGN_PORT:-9090}
+      FRACTURE_THRESHOLD: ${FRACTURE_THRESHOLD:-0.0853}
+      # Flare network
+      CHAIN_URL: ${CHAIN_URL:-}
+      NORMAL_PROXY_URL: ${NORMAL_PROXY_URL:-}
+      TUNNEL_URL: ${TUNNEL_URL:-}
+      EXTENSION_ID: ${EXTENSION_ID:-}
+      INITIAL_OWNER: ${INITIAL_OWNER:-}
+      INSTRUCTION_SENDER: ${INSTRUCTION_SENDER:-}
+      FEE_WEI: ${FEE_WEI:-}
+      LOCAL_MODE: ${LOCAL_MODE:-false}
+    depends_on:
+      - vision-api
