@@ -5,6 +5,9 @@ services:
     command: uvicorn vision_api:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
+    volumes:
+      - ./vision_segmentation/SAM-Med2D:/app/vision_segmentation/SAM-Med2D:ro
+      - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
     environment:
       MODEL_ROOT: /app
     healthcheck:
