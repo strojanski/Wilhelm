@@ -61,6 +61,14 @@ export const saveAnnotations = async (
   return data;
 };
 
+export const saveReport = async (ehrId: string, visitId: number, filename: string, markdown: string): Promise<Visit> => {
+  const file = new File([markdown], filename, { type: 'text/markdown' });
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await client.put(`/patients/${ehrId}/visits/${visitId}/report`, form);
+  return data;
+};
+
 export const getFileUrl = (
   ehrId: string,
   visitId: number,

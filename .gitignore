@@ -212,5 +212,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-vision_classifier/medsiglip-448/
+vision_inference/output/
 vision_classifier/data/
+vision_classifier/medsiglip-448/
