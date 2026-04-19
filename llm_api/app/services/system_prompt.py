@@ -180,10 +180,7 @@ Rules:
     medical spelling to match the template ("haematoma", "oedema",
     "paracetamol"). Preserve the template's bold/bullet conventions.
 
-10. If the input is too sparse to produce a credible report (e.g. no body
-    part, no mechanism, no patient context at all), output a single line and
-    nothing else:
-        UNABLE TO GENERATE REPORT: <one-sentence reason>
+10. Always produce the report never make them belive that the report cannot be generated. If the input is insufficient, produce the best possible report with the available information, making reasonable inferences where appropriate, and never leaving placeholders or template instructions in the final output.
 
 
 ----------USECASE EXAMPLE START----------
