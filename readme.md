@@ -1,11 +1,10 @@
 # Wilhelm
 
-Wilhelm is an AI-assisted clinical workflow platform that unifies patient intake, triage PDFs, X-ray fracture detection, and auto-generated medical notes in one web app that can be hosted localy to accelerate emergency care decisions.
-<!-- Clinical workflow platform for patient intake, visit documentation, X-ray fracture analysis, and LLM-assisted report generation. -->
+Think about the last time you went to the emergency room. What's the one aspect of an ER experience we all share? The waiting. But it doesn't have to be this way.
 
-Our motivation is to deliver a practical, high-impact product that can compete across almost every prize track: vision, Flare, AI, APIs, greater good, web/mobile UX, innovation, code quality, growth potential, teamwork, and sponsor technologies including Gemini, and Flare.
+With Wilhelm AI, we can cut down the waiting time from hours to seconds. In dialogue with medical professionals, we developed an optimized process which uses a state-of-the-art ensemble of computer vision models and leverages the Gemini API's multimodal capabilities for generating medical reports in the blink of an eye.
 
-This repository combines a React frontend, a Spring Boot backend, a multimodal LLM API, and a vision inference stack.
+For DragonHack we focused on bone fractures, but the application can easily scale to other medical domains. Beyond individual ERs, Wilhelm AI is designed to grow into a decentralized medical AI research network — aggregating anonymized data across clinics worldwide to continuously train and improve models, making diagnoses more accurate over time and driving real progress in medicine
 
 ## What this project does
 
