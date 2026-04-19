@@ -572,20 +572,6 @@ export default function XrayDetailPage() {
               </div>
             </div>
 
-            {/* Doctor notes input */}
-            {!showPdf && (
-              <div className="px-4 pt-3 border-b border-gray-100">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor notes</label>
-                <textarea
-                  value={doctorNotes}
-                  onChange={(e) => setDoctorNotes(e.target.value)}
-                  placeholder="Add clinical observations, symptoms, or notes to include in the report…"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
-                  rows={3}
-                />
-              </div>
-            )}
-
             {/* PDF viewer */}
             {showPdf && (
               <div className="w-full border-b border-gray-100" style={{ height: '600px' }}>
@@ -598,6 +584,17 @@ export default function XrayDetailPage() {
 
             {/* report content */}
             {!showPdf && <div className="p-4 overflow-y-auto" style={{ maxHeight: '600px' }}>
+              {/* Doctor notes input */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor notes</label>
+                <textarea
+                  value={doctorNotes}
+                  onChange={(e) => setDoctorNotes(e.target.value)}
+                  placeholder="Add clinical observations, symptoms, or notes to include in the report…"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                  rows={3}
+                />
+              </div>
               {reportMut.isError && (
                 <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
