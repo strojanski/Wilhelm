@@ -19,7 +19,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.config import Settings
-from app.schemas import AnalyzeResponse
+from app.services.system_prompt import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -27,33 +27,59 @@ logger = logging.getLogger(__name__)
 # The system prompt enforces the exact JSON template we want back.
 # Gemma (and most modern instruction-tuned models) follows this reliably
 # when the schema is described clearly and we ask for JSON only.
-SYSTEM_PROMPT = """You are a structured-data extraction assistant.
+# SYSTEM_PROMPT = """You are a structured-data extraction assistant.
 
-You will receive a user's free-form text, optionally accompanied by:
-  - an image,
-  - extracted text from a PDF document,
-  - extra metadata fields.
+# You will receive a user's free-form text, optionally accompanied by:
+#   - an image,
+#   - extracted text from a PDF document,
+#   - extra metadata fields.
 
-Your job is to analyze ALL of that input together and return a SINGLE JSON
-object that exactly matches this schema:
+# Your job is to analyze ALL of that input together and return a SINGLE JSON
+# object that exactly matches this schema:
 
-{
-  "summary":    string,              // 1-3 sentence overall summary
-  "category":   string,              // single best-fit category
-  "tags":       string[],            // 3-8 short tags / keywords
-  "entities":   string[],            // named entities (people, orgs, places, products)
-  "key_points": string[],            // 3-6 bulleted key takeaways
-  "sentiment":  "positive" | "negative" | "neutral" | "mixed",
-  "confidence": number               // your confidence 0.0 - 1.0
-}
+# {
+#   "summary":    string,              // 1-3 sentence overall summary
+#   "category":   string,              // single best-fit category
+#   "tags":       string[],            // 3-8 short tags / keywords
+#   "entities":   string[],            // named entities (people, orgs, places, products)
+#   "key_points": string[],            // 3-6 bulleted key takeaways
+#   "sentiment":  "positive" | "negative" | "neutral" | "mixed",
+#   "confidence": number               // your confidence 0.0 - 1.0
+# }
 
-Rules:
-  1. Output ONLY the JSON object. No prose before or after. No markdown fences.
-  2. Use double quotes. Every field is required.
-  3. If a field has no content, use an empty array [] or "unknown".
-  4. Keep strings concise; do not invent facts not supported by the input.
-"""
+# Rules:
+#   1. Output ONLY the JSON object. No prose before or after. No markdown fences.
+#   2. Use double quotes. Every field is required.
+#   3. If a field has no content, use an empty array [] or "unknown".
+#   4. Keep strings concise; do not invent facts not supported by the input.
+# """
 
+class TestLLMService:
+    """Call a real LLM to make a poem to verify the integration is working end-to-end."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client = AsyncOpenAI(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+        )
+        self._model = settings.llm_model
+
+    async def make_poem(self, topic: str) -> str:
+        messages = [
+            {"role": "system", "content": "You are a poet."},
+            {"role": "user", "content": f"Write a short poem about {topic}."},
+        ]
+
+        completion = await self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=100,
+        )
+
+        poem = completion.choices[0].message.content or ""
+        return poem.strip()
 
 class LLMService:
     def __init__(self, settings: Settings) -> None:
@@ -70,8 +96,8 @@ class LLMService:
         pdf_text: str | None = None,
         image_data_url: str | None = None,
         extra_fields: dict[str, Any] | None = None,
-    ) -> AnalyzeResponse:
-        """Send everything to the LLM and parse back the templated response."""
+    ) -> str:
+        """Send everything to the LLM and return the model's Markdown text."""
         user_content: list[dict[str, Any]] = []
 
         prompt_body = self._build_user_text_block(user_text, pdf_text, extra_fields)
@@ -95,15 +121,12 @@ class LLMService:
             model=self._model,
             messages=messages,
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=10480,
         )
 
         raw = (completion.choices[0].message.content or "").strip()
         logger.debug("Raw LLM output: %s", raw)
-
-        payload = _extract_json_object(raw)
-        # Re-validate via Pydantic for type safety.
-        return AnalyzeResponse(**payload, raw_model_output=None)
+        return raw
 
     @staticmethod
     def _build_user_text_block(
@@ -124,7 +147,10 @@ class LLMService:
         parts.append(
             "\n=== TASK ===\n"
             "Analyze everything above (including the attached image if present) "
-            "and return the JSON object as specified."
+            "and return the completed Markdown medical report as specified. "
+            "Fill every section with clinically useful detail, prefer a complete "
+            "report over a terse summary, and keep the template structure exactly "
+            "as provided."
         )
         return "\n".join(parts)
 
