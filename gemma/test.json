@@ -1,0 +1,10 @@
+{
+  "model": "gemma-4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, what can you do?"
+    }
+  ],
+  "max_tokens": 100
+}
