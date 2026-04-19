@@ -5,12 +5,10 @@ import { Plus, Search, Trash2, Users, ChevronLeft, ChevronRight } from 'lucide-r
 import { getPatients, deletePatient } from '../api/patients';
 import type { Patient } from '../api/types';
 import Spinner from '../components/Spinner';
-import Badge from '../components/Badge';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import CreatePatientModal from './CreatePatientModal';
 
-const genderColor = { MALE: 'blue', FEMALE: 'purple', OTHER: 'gray' } as const;
 
 export default function PatientListPage() {
   const navigate = useNavigate();
@@ -43,30 +41,31 @@ export default function PatientListPage() {
     : patients;
 
   return (
-    <div>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Patients</h1>
+    <div className="mx-auto w-full max-w-7xl px-6 py-6">
+      {/* Header row */}
+      <div className="mb-5 flex items-baseline justify-between">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Patients</h1>
           {data && (
-            <p className="mt-0.5 text-sm text-gray-500">{data.totalElements} total</p>
+            <span className="font-mono text-xs text-slate-500">
+              {data.totalElements} total
+            </span>
           )}
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700"
-        >
-          <Plus className="h-4 w-4" />
-          New Patient
-        </button>
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+          Ward directory
+        </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-        <Search className="h-4 w-4 shrink-0 text-gray-400" />
+      {/* Search bar */}
+      <div className="relative mb-4">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
+          autoFocus
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or EHR ID…"
-          className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
+          className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
 
@@ -83,7 +82,7 @@ export default function PatientListPage() {
             !search ? (
               <button
                 onClick={() => setShowCreate(true)}
-                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+                className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
               >
                 <Plus className="h-4 w-4" /> New Patient
               </button>
@@ -91,75 +90,81 @@ export default function PatientListPage() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Patient</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">EHR ID</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Age</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Gender</th>
-                <th className="relative px-6 py-3"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((p) => (
-                <tr
-                  key={p.id}
-                  onClick={() => navigate(`/patients/${p.ehrId}`)}
-                  className="cursor-pointer transition-colors hover:bg-brand-50"
+        <>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filtered.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => navigate(`/patients/${p.ehrId}`)}
+                className="group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border border-slate-200 bg-white px-3 py-2.5 transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-800 hover:shadow-md hover:shadow-slate-900/10"
+              >
+                <div className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-slate-800 opacity-0 transition-opacity group-hover:opacity-100" />
+
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[13px] font-semibold text-slate-100 ring-1 ring-slate-900/5">
+                  {p.firstName[0]}
+                  {p.lastName[0]}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-sm font-semibold tracking-tight text-slate-900">
+                    {p.lastName}, {p.firstName}
+                  </h3>
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-slate-500">
+                    {p.ehrId} · {p.age}y {p.gender[0]}
+                  </p>
+                </div>
+
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setToDelete(p);
+                  }}
+                  className="rounded-md p-1 text-slate-300 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                  aria-label="Delete patient"
                 >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700">
-                        {p.firstName[0]}{p.lastName[0]}
-                      </div>
-                      <span className="font-medium text-gray-900">{p.firstName} {p.lastName}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 font-mono text-sm text-gray-600">{p.ehrId}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{p.age}</td>
-                  <td className="px-6 py-4">
-                    <Badge label={p.gender} color={genderColor[p.gender]} />
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setToDelete(p); }}
-                      className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
 
           {data && data.totalPages > 1 && !search && (
-            <div className="flex items-center justify-between border-t border-gray-200 px-6 py-3">
-              <p className="text-sm text-gray-500">
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <p className="font-mono text-xs text-slate-500">
                 Page {data.number + 1} of {data.totalPages}
               </p>
-              <div className="flex gap-2">
+              <div className="flex gap-1">
                 <button
                   disabled={data.number === 0}
                   onClick={() => setPage((p) => p - 1)}
-                  className="rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                  aria-label="Previous page"
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
                   disabled={data.number + 1 >= data.totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                  aria-label="Next page"
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             </div>
           )}
-        </div>
+        </>
       )}
+
+      {/* Floating action button */}
+      <button
+        onClick={() => setShowCreate(true)}
+        className="fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-blue-500 text-white shadow-xl shadow-blue-500/40 transition hover:scale-105 hover:shadow-blue-500/60 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+        aria-label="New patient"
+        title="New patient"
+      >
+        <Plus className="h-6 w-6" />
+      </button>
 
       {showCreate && <CreatePatientModal onClose={() => setShowCreate(false)} />}
 

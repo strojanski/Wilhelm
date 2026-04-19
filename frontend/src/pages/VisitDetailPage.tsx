@@ -1,20 +1,31 @@
-import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  ChevronRight,
-  Users,
   FileText,
   ClipboardList,
   Scan,
   Download,
   ExternalLink,
+  Upload,
+  Loader2,
+  AlertTriangle,
+  Sparkles,
+  CheckCircle,
+  RotateCcw,
+  Eye,
 } from 'lucide-react';
 import { getPatient } from '../api/patients';
-import { getVisit, uploadTriage, uploadReport, uploadXray, getFileUrl } from '../api/visits';
+import {
+  getVisit,
+  uploadTriage,
+  uploadReport,
+  uploadXray,
+  analyzeXray,
+  getFileUrl,
+} from '../api/visits';
+import type { XrayAnalysis } from '../api/types';
 import Spinner from '../components/Spinner';
-import FileUploadButton from '../components/FileUploadButton';
-import XrayViewer from '../components/XrayViewer';
 import { format } from 'date-fns';
 
 type DocType = 'triage' | 'report';
@@ -63,164 +74,144 @@ export default function VisitDetailPage() {
     uploadMut.mutate({ type, file });
   };
 
+  // Auto-navigate to the single X-ray when this visit has exactly one
+  const autoNavRef = useRef(false);
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (autoNavRef.current) return;
+    if (!visit) return;
+    if (visit.xrayFiles.length !== 1) return;
+    autoNavRef.current = true;
+    navigate(
+      `/patients/${ehrId}/visits/${visitId}/xray/${encodeURIComponent(visit.xrayFiles[0])}?auto=1`,
+      { replace: true },
+    );
+  }, [visit, ehrId, visitId, navigate]);
+
   if (isLoading) {
-    return <div className="flex justify-center py-20"><Spinner /></div>;
+    return (
+      <div className="flex justify-center py-20">
+        <Spinner />
+      </div>
+    );
   }
 
   if (!visit) {
-    return <p className="py-20 text-center text-gray-500">Visit not found.</p>;
+    return <p className="py-20 text-center text-slate-500">Visit not found.</p>;
   }
 
   return (
-    <div>
-      {/* Breadcrumb */}
-      <nav className="mb-6 flex flex-wrap items-center gap-1 text-sm text-gray-500">
-        <Link to="/patients" className="flex items-center gap-1 hover:text-brand-600">
-          <Users className="h-3.5 w-3.5" /> Patients
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link to={`/patients/${ehrId}`} className="hover:text-brand-600">
-          {patient ? `${patient.firstName} ${patient.lastName}` : ehrId}
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <span className="font-medium text-gray-900">
-          Visit {format(new Date(visit.visitDate), 'MMM d, yyyy')}
-        </span>
-      </nav>
-
-      {/* Visit header */}
-      <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mx-auto w-full max-w-7xl px-6 py-6">
+      {/* Visit summary bar */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 flex-col items-center justify-center rounded-md border border-slate-200 bg-slate-50 leading-none">
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-slate-500">
+              {format(new Date(visit.visitDate), 'MMM')}
+            </span>
+            <span className="mt-0.5 font-mono text-base font-bold text-slate-900">
+              {format(new Date(visit.visitDate), 'dd')}
+            </span>
+          </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              {format(new Date(visit.visitDate), 'MMMM d, yyyy')}
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">
+              {format(new Date(visit.visitDate), 'EEEE, MMMM d, yyyy')}
             </h1>
-            <p className="mt-0.5 text-sm text-gray-400">
-              Created {format(new Date(visit.createdAt), "MMM d, yyyy 'at' HH:mm")} · Visit #{visit.id}
+            <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+              Visit #{visit.id} · created {format(new Date(visit.createdAt), 'dd MMM HH:mm')}
+              {patient && ` · ${patient.lastName}, ${patient.firstName}`}
             </p>
           </div>
-          <div className="flex gap-4 text-sm text-gray-500">
-            <span>{visit.triageFiles.length} triage</span>
-            <span>{visit.reportFiles.length} reports</span>
-            <span>{visit.xrayFiles.length} x-rays</span>
-          </div>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <Metric label="triage" value={visit.triageFiles.length} tone="blue" />
+          <Metric label="reports" value={visit.reportFiles.length} tone="emerald" />
+          <Metric label="x-rays" value={visit.xrayFiles.length} tone="amber" />
         </div>
       </div>
 
       {uploadError && (
-        <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
           {uploadError}
         </div>
       )}
 
-      {/* Triage + Reports side by side */}
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        {/* Triage */}
-        <div className="rounded-2xl border border-blue-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between border-b border-blue-200 bg-blue-50 px-5 py-4 text-blue-700">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
-                <ClipboardList className="h-4 w-4" />
-              </div>
-              <span className="font-semibold">Triage</span>
+      {/* 3-column grid */}
+      <div className="grid grid-cols-12 gap-4">
+        {/* Col A: Triage */}
+        <FileColumn
+          colClass="col-span-12 md:col-span-3"
+          icon={<ClipboardList className="h-3.5 w-3.5" />}
+          title="Triage"
+          accent="text-blue-600"
+          files={visit.triageFiles}
+          fileHref={(f) => getFileUrl(ehrId!, visit.id, 'triage', f)}
+          uploading={uploading === 'triage'}
+          onUpload={(f) => handleUpload('triage', f)}
+          accept=".pdf"
+          uploadLabel="Upload triage PDF"
+        />
+
+        {/* Col B: Reports */}
+        <FileColumn
+          colClass="col-span-12 md:col-span-3"
+          icon={<FileText className="h-3.5 w-3.5" />}
+          title="Medical Reports"
+          accent="text-emerald-600"
+          files={visit.reportFiles}
+          fileHref={(f) => getFileUrl(ehrId!, visit.id, 'report', f)}
+          uploading={uploading === 'report'}
+          onUpload={(f) => handleUpload('report', f)}
+          accept=".pdf"
+          uploadLabel="Upload report PDF"
+        />
+
+        {/* Col C: X-rays */}
+        <div className="col-span-12 md:col-span-6">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-amber-600">
+              <Scan className="h-3.5 w-3.5" />
+              X-Ray Imaging
+              <span className="font-mono text-[10px] text-slate-400">
+                · {visit.xrayFiles.length} file{visit.xrayFiles.length !== 1 ? 's' : ''}
+              </span>
             </div>
-            <span className="text-xs font-medium opacity-70">
-              {visit.triageFiles.length} file{visit.triageFiles.length !== 1 ? 's' : ''}
+            <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-blue-700">
+              <Sparkles className="h-3 w-3" />
+              AI detection
             </span>
           </div>
-          <div className="p-5">
-            {visit.triageFiles.length === 0 ? (
-              <p className="mb-4 text-sm text-gray-400">No files uploaded yet.</p>
-            ) : (
-              <ul className="mb-4 space-y-2">
-                {visit.triageFiles.map((filename) => (
-                  <FileRow
-                    key={filename}
-                    filename={filename}
-                    href={getFileUrl(ehrId!, visit.id, 'triage', filename)}
-                  />
-                ))}
-              </ul>
-            )}
-            <FileUploadButton
-              label="Upload Triage"
-              accept=".pdf"
-              loading={uploading === 'triage'}
-              onFile={(f) => handleUpload('triage', f)}
-            />
-          </div>
-        </div>
 
-        {/* Medical Reports */}
-        <div className="rounded-2xl border border-green-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between border-b border-green-200 bg-green-50 px-5 py-4 text-green-700">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100 text-green-600">
-                <FileText className="h-4 w-4" />
-              </div>
-              <span className="font-semibold">Medical Reports</span>
+          {visit.xrayFiles.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
+              <Scan className="mx-auto h-6 w-6 text-slate-300" />
+              <p className="mt-2 text-sm font-medium text-slate-600">No X-rays yet</p>
+              <p className="mt-0.5 text-xs text-slate-400">
+                Upload an image to start AI fracture detection
+              </p>
             </div>
-            <span className="text-xs font-medium opacity-70">
-              {visit.reportFiles.length} file{visit.reportFiles.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <div className="p-5">
-            {visit.reportFiles.length === 0 ? (
-              <p className="mb-4 text-sm text-gray-400">No files uploaded yet.</p>
-            ) : (
-              <ul className="mb-4 space-y-2">
-                {visit.reportFiles.map((filename) => (
-                  <FileRow
-                    key={filename}
-                    filename={filename}
-                    href={getFileUrl(ehrId!, visit.id, 'report', filename)}
-                  />
-                ))}
-              </ul>
-            )}
-            <FileUploadButton
-              label="Upload Report"
-              accept=".pdf"
-              loading={uploading === 'report'}
-              onFile={(f) => handleUpload('report', f)}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* X-Rays — full width with AI viewer per image */}
-      <div className="rounded-2xl border border-amber-200 bg-white shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between border-b border-amber-200 bg-amber-50 px-5 py-4 text-amber-700">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
-              <Scan className="h-4 w-4" />
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {visit.xrayFiles.map((filename) => (
+                <XrayCard
+                  key={filename}
+                  ehrId={ehrId!}
+                  visitId={visit.id}
+                  filename={filename}
+                  analysis={visit.xrayAnnotations?.[filename]}
+                  queryKey={visitQueryKey}
+                />
+              ))}
             </div>
-            <span className="font-semibold">X-Rays</span>
-            <span className="text-xs opacity-60">— AI fracture detection</span>
-          </div>
-          <span className="text-xs font-medium opacity-70">
-            {visit.xrayFiles.length} file{visit.xrayFiles.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <div className="space-y-6 p-5">
-          {visit.xrayFiles.length === 0 && (
-            <p className="text-sm text-gray-400">No X-rays uploaded yet.</p>
           )}
-          {visit.xrayFiles.map((filename) => (
-            <XrayViewer
-              key={filename}
-              ehrId={ehrId!}
-              visitId={visit.id}
-              filename={filename}
-              analysis={visit.xrayAnnotations?.[filename]}
-              queryKey={visitQueryKey}
-            />
-          ))}
-          <FileUploadButton
-            label="Upload X-Ray"
+
+          <UploadDropzone
+            className="mt-3"
+            uploading={uploading === 'xray'}
             accept="image/*,.png,.jpg,.jpeg"
-            loading={uploading === 'xray'}
-            onFile={(f) => handleUpload('xray', f)}
+            label="Upload X-ray image"
+            onUpload={(f) => handleUpload('xray', f)}
           />
         </div>
       </div>
@@ -228,22 +219,303 @@ export default function VisitDetailPage() {
   );
 }
 
-function FileRow({ filename, href }: { filename: string; href: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: 'blue' | 'emerald' | 'amber';
+}) {
+  const dot =
+    tone === 'blue' ? 'bg-blue-500' : tone === 'emerald' ? 'bg-emerald-500' : 'bg-amber-500';
   return (
-    <li className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
-      <span className="truncate font-mono text-xs text-gray-700 max-w-[200px]" title={filename}>
-        {filename}
-      </span>
-      <div className="flex shrink-0 gap-1 ml-2">
-        <a href={href} target="_blank" rel="noreferrer"
-          className="rounded p-1 text-gray-400 hover:text-brand-600" title="Open">
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-        <a href={href} download={filename}
-          className="rounded p-1 text-gray-400 hover:text-brand-600" title="Download">
-          <Download className="h-3.5 w-3.5" />
-        </a>
+    <div className="flex items-center gap-2">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      <span className="font-mono text-xs text-slate-500">{label}</span>
+      <span className="font-mono text-xs font-bold text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+function FileColumn({
+  colClass,
+  icon,
+  title,
+  accent,
+  files,
+  fileHref,
+  uploading,
+  onUpload,
+  accept,
+  uploadLabel,
+}: {
+  colClass: string;
+  icon: React.ReactNode;
+  title: string;
+  accent: string;
+  files: string[];
+  fileHref: (filename: string) => string;
+  uploading: boolean;
+  onUpload: (file: File) => void;
+  accept: string;
+  uploadLabel: string;
+}) {
+  return (
+    <div className={colClass}>
+      <div className="mb-2 flex items-center justify-between">
+        <div
+          className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest ${accent}`}
+        >
+          {icon}
+          {title}
+          <span className="font-mono text-[10px] text-slate-400">
+            · {files.length} file{files.length !== 1 ? 's' : ''}
+          </span>
+        </div>
       </div>
-    </li>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-2">
+        {files.length === 0 ? (
+          <p className="px-2 py-3 text-center text-xs text-slate-400">No files yet.</p>
+        ) : (
+          <ul className="space-y-0.5">
+            {files.map((filename) => (
+              <li key={filename}>
+                <div className="group flex items-center gap-2 rounded-md px-2.5 py-2 transition hover:bg-slate-50">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span
+                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-700"
+                    title={filename}
+                  >
+                    {filename}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                    <a
+                      href={fileHref(filename)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
+                      title="Open"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                    <a
+                      href={fileHref(filename)}
+                      download={filename}
+                      className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
+                      title="Download"
+                    >
+                      <Download className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <UploadDropzone
+          className="mt-1"
+          uploading={uploading}
+          accept={accept}
+          label={uploadLabel}
+          onUpload={onUpload}
+          compact
+        />
+      </div>
+    </div>
+  );
+}
+
+function UploadDropzone({
+  uploading,
+  accept,
+  label,
+  onUpload,
+  className = '',
+  compact = false,
+}: {
+  uploading: boolean;
+  accept: string;
+  label: string;
+  onUpload: (file: File) => void;
+  className?: string;
+  compact?: boolean;
+}) {
+  const id = `upload-${label.replace(/\s+/g, '-').toLowerCase()}-${Math.random().toString(36).slice(2, 7)}`;
+  return (
+    <label
+      htmlFor={id}
+      className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-slate-300 text-slate-500 transition hover:border-blue-500 hover:bg-blue-50/50 hover:text-blue-600 ${
+        compact ? 'py-2 text-[11px]' : 'py-3 text-xs'
+      } ${className} ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+    >
+      {uploading ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Upload className="h-3.5 w-3.5" />
+      )}
+      <span className="font-medium">{uploading ? 'Uploading…' : label}</span>
+      <input
+        id={id}
+        type="file"
+        accept={accept}
+        disabled={uploading}
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            onUpload(f);
+            e.currentTarget.value = '';
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+function XrayCard({
+  ehrId,
+  visitId,
+  filename,
+  analysis,
+  queryKey,
+}: {
+  ehrId: string;
+  visitId: number;
+  filename: string;
+  analysis: XrayAnalysis | undefined;
+  queryKey: unknown[];
+}) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const imgUrl = getFileUrl(ehrId, visitId, 'xray', filename);
+
+  const analyzeMut = useMutation({
+    mutationFn: () => analyzeXray(ehrId, visitId, filename),
+    onSuccess: (updated) => {
+      qc.setQueryData(queryKey, updated);
+    },
+  });
+
+  const segments = analysis?.segments ?? [];
+  const hasSegments = segments.length > 0;
+  const notAnalyzed = !analysis;
+
+  const [launching, setLaunching] = useState(false);
+  const openDetail = () => {
+    if (launching) return;
+    setLaunching(true);
+    window.setTimeout(() => {
+      navigate(`/patients/${ehrId}/visits/${visitId}/xray/${encodeURIComponent(filename)}?auto=1`);
+    }, 450);
+  };
+
+  let statusBadge: React.ReactNode = null;
+  if (notAnalyzed) {
+    statusBadge = (
+      <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/60 bg-slate-900/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-300 backdrop-blur">
+        Not analyzed
+      </span>
+    );
+  } else if (hasSegments) {
+    statusBadge = (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-rose-400/60 bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-rose-200 backdrop-blur"
+        style={{ boxShadow: '0 0 12px rgba(244,63,94,0.35)' }}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+        {segments.length} fracture{segments.length !== 1 ? 's' : ''}
+      </span>
+    );
+  } else {
+    statusBadge = (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-200 backdrop-blur">
+        <CheckCircle className="h-3 w-3" />
+        Clear
+      </span>
+    );
+  }
+
+  return (
+    <div
+      onClick={openDetail}
+      className="group relative aspect-square cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-black transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/20"
+    >
+      <img src={imgUrl} alt={filename} className="h-full w-full object-contain" />
+
+      {/* Top-right status */}
+      <div className="absolute right-2 top-2 z-10">{statusBadge}</div>
+
+      {/* Bottom filename strip */}
+      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-3 py-2">
+        <p className="truncate font-mono text-[11px] text-slate-200" title={filename}>
+          {filename}
+        </p>
+      </div>
+
+      {/* Hover overlay with actions */}
+      <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-black/60 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            openDetail();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md bg-white/95 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-white"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          View
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            analyzeMut.mutate();
+          }}
+          disabled={analyzeMut.isPending}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-blue-500/40 hover:from-blue-500 hover:to-blue-400 disabled:opacity-60"
+        >
+          {analyzeMut.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : notAnalyzed ? (
+            <Sparkles className="h-3.5 w-3.5" />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" />
+          )}
+          {analyzeMut.isPending ? 'Analyzing…' : notAnalyzed ? 'Analyze' : 'Re-analyze'}
+        </button>
+      </div>
+
+      {/* Analyze-in-progress overlay */}
+      {analyzeMut.isPending && (
+        <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
+          <div
+            className="animate-scan absolute inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-blue-400 to-transparent"
+            style={{ boxShadow: '0 0 20px 3px rgba(59,130,246,0.7)' }}
+          />
+        </div>
+      )}
+
+      {/* Click-launch overlay: signals AI is starting */}
+      {launching && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-[#0A0F1E]/75 backdrop-blur-[2px]">
+          <div className="absolute inset-0 overflow-hidden">
+            <div
+              className="animate-scan absolute inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-blue-400 to-transparent"
+              style={{ boxShadow: '0 0 24px 4px rgba(59,130,246,0.85)' }}
+            />
+          </div>
+          <div className="relative flex flex-col items-center gap-2 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-blue-400/40 bg-blue-500/20 shadow-[0_0_24px_rgba(59,130,246,0.5)]">
+              <Sparkles className="h-5 w-5 text-blue-300" />
+            </div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-blue-200">
+              Wilhelm AI · starting
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

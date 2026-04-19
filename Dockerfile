@@ -3,6 +3,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxcb1 libxext6 libx11-6 libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # CPU-only torch avoids pulling ~1.5GB of CUDA wheels.
 # Override with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 for GPU.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu

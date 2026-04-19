@@ -100,10 +100,13 @@ class Server:
             return 404, {"error": "not found"}
 
     def _handle_action(self, handler: BaseHTTPRequestHandler) -> None:
-        content_length = int(handler.headers.get("Content-Length", 0))
-        body = handler.rfile.read(content_length)
-
-        status_code, response = self._process_action(body)
+        try:
+            content_length = int(handler.headers.get("Content-Length", 0))
+            body = handler.rfile.read(content_length)
+            status_code, response = self._process_action(body)
+        except Exception as e:
+            logger.exception("unhandled error in _handle_action: %s", e)
+            status_code, response = 400, {"error": "bad request"}
         self._send_json(handler, status_code, response)
 
     def _handle_state(self, handler: BaseHTTPRequestHandler) -> None:

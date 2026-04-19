@@ -92,11 +92,11 @@ class AnalyzeUrlRequest(BaseModel):
     image_url: str
 
 
-def _classify_from_cache(filename: str) -> float:
+def _classify_from_cache(filename: str) -> float | None:
     emb_cache = _resources["emb_cache"]
     clf       = _resources["clf"]
     if filename not in emb_cache:
-        raise HTTPException(status_code=404, detail=f"No embedding cached for '{filename}'. Run build_cache.py first.")
+        return None
     emb = emb_cache[filename].reshape(1, -1)
     return float(clf.predict_proba(emb)[0, 1])
 
@@ -105,16 +105,22 @@ def _run_inference(img: Image.Image, filename: str, yolo_conf: float = 0.25) -> 
     detector  = _resources["detector"]
     predictor = _resources["predictor"]
 
-    prob_fracture = _classify_from_cache(filename)
+    img_np   = np.array(img.convert("RGB"))
+    yolo_res = detector.predict(img_np, conf=yolo_conf, verbose=False)[0]
+    boxes    = yolo_res.boxes.xyxy.cpu().numpy() if len(yolo_res.boxes) else []
+    confs    = yolo_res.boxes.conf.cpu().numpy() if len(yolo_res.boxes) else []
+
+    cached_prob = _classify_from_cache(filename)
+    if cached_prob is not None:
+        prob_fracture = cached_prob
+    else:
+        # No cached embedding — derive probability from YOLO detections
+        prob_fracture = float(max(confs)) if len(confs) else 0.0
+
     predicted     = prob_fracture >= THRESHOLD
 
     segments: list[Segment] = []
     if predicted:
-        img_np   = np.array(img.convert("RGB"))
-        yolo_res = detector.predict(img_np, conf=yolo_conf, verbose=False)[0]
-        boxes    = yolo_res.boxes.xyxy.cpu().numpy() if len(yolo_res.boxes) else []
-        confs    = yolo_res.boxes.conf.cpu().numpy() if len(yolo_res.boxes) else []
-
         if len(boxes):
             with torch.no_grad():
                 predictor.set_image(img_np)

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  ChevronRight, Users, Scan, RotateCcw, ZoomIn, ZoomOut,
+  ScanLine, RotateCcw, ZoomIn, ZoomOut,
   Eye, EyeOff, Pencil, Trash2, X, Save, CheckCircle,
-  Loader2, AlertTriangle, FileText, Edit3, Download,
+  Loader2, AlertTriangle, FileText, Edit3, Download, Sparkles,
 } from 'lucide-react';
 import { getPatient } from '../api/patients';
 import { getVisit, analyzeXray, saveAnnotations, getFileUrl, uploadReport } from '../api/visits';
@@ -21,6 +21,43 @@ const FRACTURE_COLOR = 'rgba(255,60,60,0.55)';
 const FRACTURE_BORDER = 'rgba(255,60,60,0.95)';
 const USER_COLOR = 'rgba(255,200,0,0.55)';
 const USER_BORDER = 'rgba(255,200,0,0.95)';
+
+const ACCENT = '#9f1239';
+
+function seededBarcode(seed: string, width = 150, height = 40, scale = 1) {
+  let h = 0;
+  for (const c of seed) h = ((h << 5) - h + c.charCodeAt(0)) | 0;
+  let rnd = (Math.abs(h) || 42) >>> 0;
+  const bars: Array<{ x: number; w: number }> = [];
+  let x = 0;
+  while (x < width) {
+    rnd = (rnd * 1103515245 + 12345) >>> 0;
+    const barW = ((rnd % 3) + 1) * scale;
+    rnd = (rnd * 1103515245 + 12345) >>> 0;
+    const gapW = ((rnd % 3) + 1) * scale;
+    if (x + barW > width) break;
+    bars.push({ x, w: barW });
+    x += barW + gapW;
+  }
+  const digits = (Math.abs(h) % 1_000_000_000).toString().padStart(9, '0');
+  return { bars, height, width, digits };
+}
+
+function Barcode({ seed, width = 150, height = 40 }: { seed: string; width?: number; height?: number }) {
+  const { bars, digits } = seededBarcode(seed, width, height);
+  return (
+    <div style={{ display: 'inline-block', textAlign: 'center' }}>
+      <div style={{ position: 'relative', width: `${width}px`, height: `${height}px`, background: '#fff' }}>
+        {bars.map((b, i) => (
+          <div key={i} style={{ position: 'absolute', left: `${b.x}px`, top: 0, width: `${b.w}px`, height: `${height}px`, background: '#000' }} />
+        ))}
+      </div>
+      <div style={{ fontSize: '9px', letterSpacing: '0.25em', marginTop: '2px', fontFamily: 'Arial, Helvetica, sans-serif', color: '#000' }}>
+        {digits}
+      </div>
+    </div>
+  );
+}
 
 export default function XrayDetailPage() {
   const { ehrId, visitId, filename } = useParams<{ ehrId: string; visitId: string; filename: string }>();
@@ -99,7 +136,7 @@ export default function XrayDetailPage() {
       const p = new Promise<void>((resolve) => {
         const img = new window.Image();
         img.onload = () => { if (!cancelled) { map.set(seg.annId, img); } resolve(); };
-        img.onerror = resolve;
+        img.onerror = () => resolve();
         img.src = `data:image/png;base64,${seg.maskB64}`;
       });
       pending.push(p);
@@ -133,7 +170,6 @@ export default function XrayDetailPage() {
     mutationFn: () => {
       return analyzeWithLLM(doctorNotes || 'Produce a structured medical radiology report in Markdown.', patient!, category, triagePdfUrl);
     },
-    enabled: !!patient,
     onSuccess: (md) => { setReportMd(md); setReportTab('preview'); },
   });
 
@@ -168,6 +204,29 @@ export default function XrayDetailPage() {
     },
     onSuccess: (updated) => { qc.setQueryData(visitQueryKey, updated); setPdfBlobUrl(null); setShowPdf(true); },
   });
+
+  // ── auto-run fracture analysis on arrival when not yet analyzed ────────────
+  const autoAnalyzedRef = useRef(false);
+  useEffect(() => {
+    if (autoAnalyzedRef.current) return;
+    if (!visit) return;
+    if (analysis) return;
+    if (analyzeMut.isPending) return;
+    autoAnalyzedRef.current = true;
+    analyzeMut.mutate();
+  }, [visit, analysis, analyzeMut]);
+
+  // ── auto-save PDF immediately after report is generated ────────────────────
+  const autoSavedRef = useRef(false);
+  useEffect(() => {
+    if (autoSavedRef.current) return;
+    if (!reportMd || !reportMut.isSuccess) return;
+    if (existingReport) return;
+    if (saveReportMut.isPending) return;
+    autoSavedRef.current = true;
+    const id = window.setTimeout(() => saveReportMut.mutate(), 300);
+    return () => window.clearTimeout(id);
+  }, [reportMd, reportMut.isSuccess, existingReport, saveReportMut]);
 
   // ── canvas render ──────────────────────────────────────────────────────────
   const renderCanvas = useCallback(() => {
@@ -224,17 +283,12 @@ export default function XrayDetailPage() {
           ctx.fillRect(rx, ry, rw, rh);
         }
 
-        // Outline bbox for selected or user-drawn segments
-        if (!maskImg || isSelected) {
-          ctx.strokeStyle = border;
-          ctx.lineWidth = isSelected ? 3 : 1.5;
-          ctx.strokeRect(rx, ry, rw, rh);
-        }
-
-        // Label
-        ctx.font = `bold ${Math.max(10, 12 * sx)}px system-ui`;
-        ctx.fillStyle = border;
-        ctx.fillText(seg.userCorrected ? 'corrected' : `${Math.round(seg.iouScore * 100)}%`, rx + 3, ry - 3);
+        // Ground-truth bbox — always shown in green (AI) or amber (user-corrected)
+        ctx.strokeStyle = seg.userCorrected
+          ? 'rgba(251,191,36,0.95)'
+          : 'rgba(74,222,128,0.95)';
+        ctx.lineWidth = isSelected ? 3 : 1.5;
+        ctx.strokeRect(rx, ry, rw, rh);
 
         if (mode === 'delete') {
           ctx.fillStyle = 'rgba(220,38,38,0.9)';
@@ -301,359 +355,659 @@ export default function XrayDetailPage() {
 
   const cursor = mode === 'draw' ? 'crosshair' : mode === 'delete' ? 'pointer' : 'default';
 
-  if (isLoading) return <div className="flex justify-center py-20"><Spinner /></div>;
+  // ── magnifier state ────────────────────────────────────────────────────────
+  const MAGNIFIER_SIZE = 160;
+  const MAGNIFIER_ZOOM = 3;
+  const [magnifier, setMagnifier] = useState<{ x: number; y: number } | null>(null);
+
+  const onMouseMoveImg = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (mode !== 'view') return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMagnifier({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex h-[calc(100vh-3rem)] items-center justify-center bg-[#0A0F1E]">
+        <Spinner />
+      </div>
+    );
+  }
+
+  const ToolbarBtn = ({
+    onClick, active, disabled, title, children,
+  }: { onClick: () => void; active?: boolean; disabled?: boolean; title: string; children: React.ReactNode }) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`group flex h-10 w-10 items-center justify-center rounded-md border backdrop-blur transition-all duration-150 disabled:opacity-40 ${
+        active
+          ? 'border-blue-500/70 bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/60'
+          : 'border-slate-700/80 bg-slate-900/70 text-slate-300 hover:border-blue-500/50 hover:text-blue-300'
+      }`}
+    >
+      {children}
+    </button>
+  );
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Hidden div used to render markdown for PDF export */}
+    <>
+      {/* Hidden div used to render markdown for PDF export — izvid layout, English */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0, width: '794px', background: '#fff' }}>
-        <div ref={mdPreviewRef} style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: '#1a1a2e', background: '#fff', padding: '48px 56px' }}>
-          {/* Header */}
-          <div style={{ borderBottom: '3px solid #1e40af', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div ref={mdPreviewRef} style={{ fontFamily: '"Times New Roman", Georgia, serif', color: '#000', background: '#fff', padding: '56px 64px', fontSize: '11.5px', lineHeight: 1.55 }}>
+
+          {/* Top row: registration/patient grid (left) + hospital branding (right) */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+
+            {/* Left: labels + values, two-column grid, sans-serif */}
+            <div style={{ flex: 1, fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: '#000' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', columnGap: '24px', rowGap: '6px', alignItems: 'baseline' }}>
+                <div>Reg. No.</div>
+                <div>Patient ID:</div>
+
+                <div style={{ fontSize: '26px', fontWeight: 300, letterSpacing: '0.01em', lineHeight: 1 }}>
+                  {String(visit?.id ?? 0).padStart(5, '0')}/26
+                </div>
+                <div style={{ fontSize: '11px' }}>{patient?.ehrId ?? '—'}</div>
+
+                <div>Name:</div>
+                <div style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {patient ? `${patient.lastName}   ${patient.firstName}` : '—'}
+                </div>
+
+                <div>Sex / Age:</div>
+                <div>{patient ? `${patient.gender}, ${patient.age} years` : '—'}</div>
+
+                <div>Date of birth:</div>
+                <div>—</div>
+              </div>
+            </div>
+
+            {/* Right: hospital name, logo mark, department block */}
+            <div style={{ textAlign: 'right', minWidth: '260px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
+                <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: '16px', fontWeight: 400, color: '#000', letterSpacing: '0.005em' }}>
+                  wilhelm medical center
+                </div>
+                <svg width="26" height="20" viewBox="0 0 26 20">
+                  <path d="M2 18 C 6 2, 12 2, 14 10 C 16 18, 22 18, 24 4" stroke={ACCENT} strokeWidth="3" fill="none" strokeLinecap="round" />
+                </svg>
+              </div>
+              <div style={{ marginTop: '8px', fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '10.5px', color: '#000', lineHeight: 1.55, textAlign: 'right' }}>
+                <div style={{ color: ACCENT, fontWeight: 600 }}>Radiology Clinic</div>
+                <div style={{ textTransform: 'uppercase', letterSpacing: '0.02em' }}>Emergency Imaging Unit</div>
+                <div>AI-Assisted Fracture Detection</div>
+                <div>Ljubljana, Zaloška 7</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Second row: barcode + visit/report dates (right side) */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: '40px', marginTop: '4px', marginBottom: '22px', fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px' }}>
             <div>
-              <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e3a8a', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'Arial, Helvetica, sans-serif' }}>
-                Wilhelm Radiology
-              </div>
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px', fontFamily: 'Arial, Helvetica, sans-serif' }}>
-                AI-Assisted Fracture Detection Report
-              </div>
+              <Barcode seed={`${patient?.ehrId ?? 'X'}-${visit?.id ?? 0}-${decodedFilename}`} width={160} height={42} />
             </div>
-            <div style={{ textAlign: 'right', fontSize: '11px', color: '#475569', fontFamily: 'Arial, Helvetica, sans-serif' }}>
-              <div style={{ fontWeight: 600 }}>Date: {format(new Date(), 'MMMM d, yyyy')}</div>
-              {patient && (
-                <>
-                  <div>Patient: {patient.firstName} {patient.lastName}</div>
-                  <div>Age: {patient.age} · Gender: {patient.gender}</div>
-                  <div style={{ color: '#94a3b8', marginTop: '2px' }}>ID: {patient.ehrId}</div>
-                </>
-              )}
+            <div style={{ textAlign: 'right', color: '#000', lineHeight: 1.6 }}>
+              <div>Date of visit: <span style={{ fontWeight: 600 }}>{visit ? format(new Date(visit.visitDate), 'dd.MM.yyyy') : '—'}</span></div>
+              <div>Date of report: <span style={{ fontWeight: 600 }}>{format(new Date(), 'dd.MM.yyyy HH:mm')}</span></div>
             </div>
           </div>
 
-          {/* X-ray reference */}
-          <div style={{ background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '10px 14px', marginBottom: '24px', fontSize: '11px', color: '#1e40af', fontFamily: 'Arial, Helvetica, sans-serif', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontWeight: 700 }}>X-ray file:</span>
-            <span style={{ fontFamily: 'monospace', background: '#dbeafe', padding: '1px 6px', borderRadius: '3px' }}>{decodedFilename}</span>
-            {analysis && (
-              <span style={{ marginLeft: 'auto', color: segments.length > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-                {segments.length > 0 ? `⚠ ${segments.length} fracture region${segments.length > 1 ? 's' : ''} detected` : '✓ No fractures detected'}
-              </span>
-            )}
+          {/* Separator + template subheader */}
+          <hr style={{ border: 'none', borderTop: '0.7px solid #000', margin: 0 }} />
+          <p style={{ fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '11px', color: '#000', margin: '10px 0', fontStyle: 'normal' }}>
+            The patient was examined in the radiology department for diagnostic imaging and fracture assessment.
+          </p>
+          <hr style={{ border: 'none', borderTop: '0.7px solid #000', margin: '0 0 22px' }} />
+
+          {/* Department code line */}
+          <div style={{ fontFamily: '"Times New Roman", Georgia, serif', fontSize: '11px', color: '#000', marginBottom: '2px' }}>
+            rd/xr
           </div>
 
-          {/* Markdown body */}
-          <div style={{ fontSize: '12px', lineHeight: 1.75, color: '#1e293b' }}
+          {/* Markdown body — serif, izvid-style plain headings */}
+          <div style={{ fontSize: '11.5px', lineHeight: 1.6, color: '#000' }}
             dangerouslySetInnerHTML={{ __html: (() => {
-              // minimal inline markdown → html for PDF
               let html = reportMd
-                .replace(/^# (.+)$/gm, '<h1 style="font-size:17px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #bfdbfe;padding-bottom:5px;margin:24px 0 10px;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:0.03em">$1</h1>')
-                .replace(/^## (.+)$/gm, '<h2 style="font-size:14px;font-weight:700;color:#1e40af;margin:18px 0 6px;font-family:Arial,sans-serif">$1</h2>')
-                .replace(/^### (.+)$/gm, '<h3 style="font-size:12px;font-weight:700;color:#334155;margin:14px 0 4px;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:0.05em">$1</h3>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#0f172a;font-weight:700">$1</strong>')
-                .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0" />')
-                .replace(/^- (.+)$/gm, '<li style="margin:3px 0;padding-left:4px">$1</li>')
-                .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul style="margin:6px 0;padding-left:20px;list-style:disc">${m}</ul>`)
-                .replace(/^(?!<[hul]|<hr|<strong)(.+)$/gm, '<p style="margin:6px 0">$1</p>');
+                .replace(/^# (.+)$/gm, '<h1 style="font-size:13px;font-weight:400;color:#000;margin:18px 0 4px;font-family:\'Times New Roman\',Georgia,serif">$1</h1>')
+                .replace(/^## (.+)$/gm, '<h2 style="font-size:12px;font-weight:400;color:#000;margin:16px 0 3px;font-family:\'Times New Roman\',Georgia,serif">$1</h2>')
+                .replace(/^### (.+)$/gm, '<h3 style="font-size:11px;font-weight:400;color:#000;margin:12px 0 2px;font-family:\'Times New Roman\',Georgia,serif;font-style:italic">$1</h3>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#000;font-weight:700">$1</strong>')
+                .replace(/^---+$/gm, '<hr style="border:none;border-top:0.5px solid #000;margin:16px 0" />')
+                .replace(/^- (.+)$/gm, '<li style="margin:1px 0">$1</li>')
+                .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul style="margin:4px 0;padding-left:22px;list-style:disc">${m}</ul>`)
+                .replace(/^(?!<[hul]|<hr|<strong)(.+)$/gm, '<p style="margin:4px 0">$1</p>');
               return html;
             })() }}
           />
 
+          {/* Small italic ancillary print */}
+          <p style={{ fontSize: '9.5px', color: '#000', fontStyle: 'italic', margin: '22px 0 0', lineHeight: 1.55, fontFamily: '"Times New Roman", Georgia, serif' }}>
+            Should you require these X-ray images for consultation outside our institution, they may be collected from
+            the Radiology Department reception, Monday to Friday between 08:00 and 19:00. Please bring a valid form of
+            identification and this report. Authorised representatives must present written authorisation signed by the
+            patient in order to collect the images.
+          </p>
+
+          {/* Signature */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '48px', marginBottom: '60px' }}>
+            <div style={{ textAlign: 'left', fontFamily: '"Times New Roman", Georgia, serif', fontSize: '11.5px', color: '#000', minWidth: '220px' }}>
+              <div>Wilhelm AI Radiology System,</div>
+              <div>electronic radiology report</div>
+            </div>
+          </div>
+
           {/* Footer */}
-          <div style={{ borderTop: '1px solid #e2e8f0', marginTop: '40px', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8', fontFamily: 'Arial, Helvetica, sans-serif' }}>
-            <span>Generated by Wilhelm AI · {format(new Date(), 'yyyy-MM-dd HH:mm')}</span>
-            <span>Confidential — For clinical use only</span>
+          <div style={{ borderTop: '0.5px solid #000', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: '9px', color: '#000', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+            <div style={{ lineHeight: 1.4 }}>
+              Signed by: Hospital<br/>
+              information system<br/>
+              Wilhelm Medical Center
+            </div>
+            <div>Page: 1 of 1</div>
           </div>
         </div>
       </div>
-      {/* Breadcrumb */}
-      <nav className="flex flex-wrap items-center gap-1 text-sm text-gray-500">
-        <Link to="/patients" className="flex items-center gap-1 hover:text-brand-600">
-          <Users className="h-3.5 w-3.5" /> Patients
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link to={`/patients/${ehrId}`} className="hover:text-brand-600">
-          {patient ? `${patient.firstName} ${patient.lastName}` : ehrId}
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <Link to={`/patients/${ehrId}/visits/${visitId}`} className="hover:text-brand-600">
-          {visit ? format(new Date(visit.visitDate), 'MMM d, yyyy') : `Visit ${visitId}`}
-        </Link>
-        <ChevronRight className="h-3.5 w-3.5" />
-        <span className="font-medium text-gray-900 font-mono">{decodedFilename}</span>
-      </nav>
 
-      {/* Split layout */}
-      <div className="flex gap-4 items-start" style={{ minHeight: 0 }}>
+      {/* Split layout — full viewport minus header */}
+      <div className="flex h-[calc(100vh-3rem)] w-full bg-[#0A0F1E] text-slate-200">
 
-        {/* ── LEFT: image + fracture controls ── */}
-        <div className="flex flex-col gap-3 min-w-0" style={{ width: '45%' }}>
-          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-            {/* toolbar */}
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-100 px-4 py-3">
-              <span className="text-sm font-semibold text-gray-700 mr-1">Fracture detection</span>
+        {/* ═══════════════════ LEFT: DICOM-style dark viewer (55%) ═══════════════════ */}
+        <section className="relative flex w-[55%] min-w-0 flex-col border-r border-slate-800">
 
-              <button onClick={() => setZoom((z) => Math.min(z + 0.25, 4))}
-                className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50" title="Zoom in">
-                <ZoomIn className="h-4 w-4" />
-              </button>
-              <button onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))}
-                className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:bg-gray-50" title="Zoom out">
-                <ZoomOut className="h-4 w-4" />
-              </button>
-              <button onClick={() => setShowOverlay((v) => !v)}
-                className={`rounded-lg border p-1.5 transition-colors ${showOverlay ? 'border-amber-300 bg-amber-50 text-amber-600' : 'border-gray-200 text-gray-400 hover:bg-gray-50'}`}>
-                {showOverlay ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-              </button>
-
-              <div className="mx-1 h-5 w-px bg-gray-200" />
-
-              {!analysis ? (
-                <button onClick={() => analyzeMut.mutate()} disabled={analyzeMut.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-60">
-                  {analyzeMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Scan className="h-3.5 w-3.5" />}
-                  {analyzeMut.isPending ? 'Analyzing…' : 'Analyze'}
-                </button>
-              ) : (
-                <button onClick={() => analyzeMut.mutate()} disabled={analyzeMut.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60" title="Re-run">
-                  {analyzeMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                  Re-analyze
-                </button>
+          {/* Canvas area */}
+          <div className="relative flex-1 overflow-auto bg-black">
+            <div
+              className="relative select-none"
+              style={{ width: `${zoom * 100}%`, minHeight: '100%' }}
+              onMouseMove={onMouseMoveImg}
+              onMouseLeave={() => setMagnifier(null)}
+            >
+              <img
+                ref={imgRef}
+                src={imgUrl}
+                alt={decodedFilename}
+                className="block h-full w-full object-contain"
+                style={{ minHeight: `calc(100vh - 3rem - 48px)` }}
+                onLoad={(e) => {
+                  const el = e.currentTarget;
+                  setImgNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
+                }}
+                draggable={false}
+              />
+              {imgNaturalSize && (
+                <canvas
+                  ref={canvasRef}
+                  className="absolute inset-0 h-full w-full"
+                  style={{
+                    cursor,
+                    filter: 'drop-shadow(0 0 6px rgba(244,63,94,0.35))',
+                  }}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                />
               )}
 
-              <button onClick={() => setMode((m) => m === 'draw' ? 'view' : 'draw')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'draw' ? 'bg-yellow-500 text-white' : 'border border-gray-200 bg-white text-gray-600 hover:bg-yellow-50'}`}>
-                <Pencil className="h-3.5 w-3.5" />
-                {mode === 'draw' ? 'Drawing…' : 'Draw region'}
-              </button>
-              <button onClick={() => setMode((m) => m === 'delete' ? 'view' : 'delete')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'delete' ? 'bg-red-500 text-white' : 'border border-gray-200 bg-white text-gray-600 hover:bg-red-50'}`}>
-                <Trash2 className="h-3.5 w-3.5" />
-                {mode === 'delete' ? 'Click to remove' : 'Remove region'}
-              </button>
-              {mode !== 'view' && (
-                <button onClick={() => setMode('view')}
-                  className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100">
-                  <X className="h-3.5 w-3.5" /> Cancel
-                </button>
-              )}
-
-              <div className="flex-1" />
-              {dirty && (
-                <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
-                  {saveMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  Save corrections
-                </button>
-              )}
-              {saveMut.isSuccess && !dirty && (
-                <span className="flex items-center gap-1 text-xs text-green-600">
-                  <CheckCircle className="h-3.5 w-3.5" /> Saved
-                </span>
-              )}
-            </div>
-
-            {analyzeMut.isError && (
-              <div className="flex items-center gap-2 bg-red-50 px-4 py-2 text-sm text-red-700">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                {(analyzeMut.error as any)?.message ?? 'Analysis failed'}
-              </div>
-            )}
-
-            {/* image */}
-            <div className="bg-black overflow-auto" style={{ height: '420px' }}>
-              <div className="relative select-none"
-                style={{ width: `${zoom * 100}%`, minHeight: `${zoom * 420}px` }}>
-                  <img
-                    ref={imgRef}
-                    src={imgUrl}
-                    alt={decodedFilename}
-                    className="block w-full object-contain"
-                    style={{ height: `${zoom * 420}px` }}
-                    onLoad={(e) => {
-                      const el = e.currentTarget;
-                      setImgNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
+              {/* Magnifier lens */}
+              {magnifier && mode === 'view' && imgNaturalSize && (() => {
+                const containerW = (canvasRef.current?.offsetWidth ?? imgNaturalSize.w) ;
+                const containerH = (canvasRef.current?.offsetHeight ?? imgNaturalSize.h);
+                const bgW = containerW * MAGNIFIER_ZOOM;
+                const bgH = containerH * MAGNIFIER_ZOOM;
+                const bgX = -(magnifier.x * MAGNIFIER_ZOOM - MAGNIFIER_SIZE / 2);
+                const bgY = -(magnifier.y * MAGNIFIER_ZOOM - MAGNIFIER_SIZE / 2);
+                return (
+                  <div
+                    className="pointer-events-none absolute z-30 rounded-full border-2 border-blue-400/70 shadow-xl shadow-black/60 overflow-hidden"
+                    style={{
+                      width: MAGNIFIER_SIZE,
+                      height: MAGNIFIER_SIZE,
+                      left: magnifier.x - MAGNIFIER_SIZE / 2,
+                      top: magnifier.y - MAGNIFIER_SIZE - 16,
+                      backgroundImage: `url(${imgUrl})`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundSize: `${bgW}px ${bgH}px`,
+                      backgroundPosition: `${bgX}px ${bgY}px`,
                     }}
-                    draggable={false}
                   />
-                  {imgNaturalSize && (
-                    <canvas ref={canvasRef} className="absolute inset-0 w-full h-full"
-                      style={{ cursor }}
-                      onPointerDown={onPointerDown}
-                      onPointerMove={onPointerMove}
-                      onPointerUp={onPointerUp}
-                    />
-                  )}
-                  {analyzeMut.isPending && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50">
-                      <Spinner size="lg" />
-                      <p className="mt-3 text-sm font-medium text-white">Running AI fracture detection…</p>
-                    </div>
-                  )}
-                  {!analysis && !analyzeMut.isPending && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <div className="rounded-xl bg-white/90 px-5 py-3 text-center shadow-lg">
-                        <Scan className="mx-auto mb-1.5 h-6 w-6 text-amber-500" />
-                        <p className="text-sm font-semibold text-gray-900">Not analyzed yet</p>
-                        <p className="text-xs text-gray-500">Click "Analyze" to detect fractures</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-            </div>
+                );
+              })()}
 
-            {/* segment chips */}
-            {segments.length > 0 && showOverlay && (
-              <div className="flex flex-wrap gap-1.5 px-4 py-3 border-t border-gray-100">
-                {segments.map((seg, idx) => (
-                  <button key={idx}
-                    onClick={() => setSelectedSeg(selectedSeg === idx ? null : idx)}
-                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium transition-colors ${selectedSeg === idx ? 'bg-red-600 text-white' : seg.userCorrected ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                    {seg.userCorrected ? '✏️' : '⚠️'} Region {idx + 1}
-                    {!seg.userCorrected && ` · ${Math.round(seg.iouScore * 100)}%`}
-                  </button>
-                ))}
+              {/* Scan line animation during analysis */}
+              {analyzeMut.isPending && (
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                  <div
+                    className="animate-scan absolute inset-x-0 h-[3px] bg-gradient-to-r from-transparent via-blue-400 to-transparent"
+                    style={{ boxShadow: '0 0 24px 4px rgba(59,130,246,0.7)' }}
+                  />
+                  <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-blue-500/10 via-transparent to-transparent h-full" />
+                </div>
+              )}
+
+              {/* Analyzing label */}
+              {analyzeMut.isPending && (
+                <div className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full border border-blue-500/40 bg-slate-900/80 px-4 py-1.5 text-xs font-medium text-blue-300 backdrop-blur">
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Running AI fracture detection…
+                  </span>
+                </div>
+              )}
+
+              {/* Idle empty state */}
+              {!analysis && !analyzeMut.isPending && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 px-5 py-4 text-center backdrop-blur-sm">
+                    <Sparkles className="mx-auto mb-2 h-6 w-6 text-blue-400" />
+                    <p className="text-sm font-semibold text-slate-100">Ready for analysis</p>
+                    <p className="mt-0.5 text-xs text-slate-400">Click "Analyze with AI" below</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Vertical toolbar — pinned left edge */}
+          <div className="absolute left-3 top-3 flex flex-col gap-1.5 z-20">
+            <ToolbarBtn onClick={() => setZoom((z) => Math.min(z + 0.25, 4))} title="Zoom in">
+              <ZoomIn className="h-4 w-4" />
+            </ToolbarBtn>
+            <ToolbarBtn onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))} title="Zoom out">
+              <ZoomOut className="h-4 w-4" />
+            </ToolbarBtn>
+            <ToolbarBtn onClick={() => setZoom(1)} title="Fit to screen">
+              <RotateCcw className="h-4 w-4" />
+            </ToolbarBtn>
+            <div className="my-1 h-px bg-slate-800" />
+            <ToolbarBtn onClick={() => setShowOverlay((v) => !v)} active={showOverlay} title={showOverlay ? 'Hide overlay' : 'Show overlay'}>
+              {showOverlay ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </ToolbarBtn>
+            <ToolbarBtn onClick={() => setMode((m) => m === 'draw' ? 'view' : 'draw')} active={mode === 'draw'} title="Draw region">
+              <Pencil className="h-4 w-4" />
+            </ToolbarBtn>
+            <ToolbarBtn onClick={() => setMode((m) => m === 'delete' ? 'view' : 'delete')} active={mode === 'delete'} title="Remove region">
+              <Trash2 className="h-4 w-4" />
+            </ToolbarBtn>
+            {mode !== 'view' && (
+              <ToolbarBtn onClick={() => setMode('view')} title="Cancel">
+                <X className="h-4 w-4" />
+              </ToolbarBtn>
+            )}
+            {dirty && (
+              <>
+                <div className="my-1 h-px bg-slate-800" />
+                <button
+                  onClick={() => saveMut.mutate()}
+                  disabled={saveMut.isPending}
+                  title="Save corrections"
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-emerald-500/60 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+                >
+                  {saveMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </button>
+              </>
+            )}
+            {saveMut.isSuccess && !dirty && (
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400" title="Saved">
+                <CheckCircle className="h-4 w-4" />
               </div>
             )}
           </div>
-        </div>
 
-        {/* ── RIGHT: report panel ── */}
-        <div className="flex-1 min-w-0 flex flex-col gap-3">
-          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-            {/* header */}
-            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                <FileText className="h-4 w-4 text-brand-500" />
-                Medical Report
-                {existingReport && (
-                  <>
+          {/* Error banner — top center */}
+          {analyzeMut.isError && (
+            <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-2 rounded-md border border-rose-500/50 bg-rose-500/15 px-3 py-1.5 text-xs text-rose-200 backdrop-blur">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {(analyzeMut.error as any)?.message ?? 'Analysis failed'}
+            </div>
+          )}
+
+          {/* Filename badge — top right */}
+          <div className="absolute right-3 top-3 z-20 rounded-md border border-slate-700/80 bg-slate-900/70 px-2.5 py-1 font-mono text-[10px] text-slate-400 backdrop-blur">
+            {decodedFilename}
+          </div>
+
+          {/* Segment chips — absolute, above bottom CTA */}
+          {segments.length > 0 && showOverlay && (
+            <div className="absolute bottom-[60px] left-0 right-0 z-10 px-4">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  Regions
+                </span>
+                {segments.map((seg, idx) => {
+                  const isSel = selectedSeg === idx;
+                  return (
                     <button
-                      onClick={() => setShowPdf(v => !v)}
-                      className={`ml-2 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium transition-colors ${showPdf ? 'bg-brand-100 text-brand-700 border border-brand-200' : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-brand-50'}`}>
-                      <FileText className="h-3 w-3" />
-                      {showPdf ? 'Hide PDF' : 'View PDF'}
+                      key={idx}
+                      onClick={() => setSelectedSeg(isSel ? null : idx)}
+                      className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs backdrop-blur transition-all duration-150 ${
+                        isSel
+                          ? 'border-blue-500 bg-blue-500/20 text-blue-200 ring-2 ring-blue-500/60 ring-offset-2 ring-offset-[#0A0F1E]'
+                          : 'border-slate-700 bg-slate-900/80 text-slate-200 hover:border-slate-500'
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          seg.userCorrected ? 'bg-amber-400' : 'bg-rose-500'
+                        }`}
+                        style={seg.userCorrected ? undefined : { boxShadow: '0 0 6px rgba(244,63,94,0.8)' }}
+                      />
+                      <span className="font-medium">Region {idx + 1}</span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        {seg.userCorrected ? 'user' : `${Math.round(seg.iouScore * 100)}%`}
+                      </span>
                     </button>
-                    <a
-                      href={reportPdfUrl!}
-                      download={reportPdfName}
-                      className="ml-1 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 transition-colors">
-                      <Download className="h-3 w-3" />
-                      Download
-                    </a>
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {reportMd && (
-                  <button
-                    onClick={() => setReportTab((t) => t === 'edit' ? 'preview' : 'edit')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${reportTab === 'edit' ? 'bg-brand-50 text-brand-700 border border-brand-200' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                    <Edit3 className="h-3.5 w-3.5" />
-                    {reportTab === 'edit' ? 'Preview' : 'Edit'}
-                  </button>
-                )}
-                {reportMd && (
-                  <button
-                    onClick={() => saveReportMut.mutate()}
-                    disabled={saveReportMut.isPending}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60">
-                    {saveReportMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveReportMut.isSuccess ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <Save className="h-3.5 w-3.5" />}
-                    {saveReportMut.isPending ? 'Saving…' : saveReportMut.isSuccess ? 'Saved' : 'Save'}
-                  </button>
-                )}
-                <button
-                  onClick={() => reportMut.mutate()}
-                  disabled={reportMut.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
-                  {reportMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-                  {reportMut.isPending ? 'Generating…' : reportMd ? 'Regenerate' : 'Generate Report'}
-                </button>
+                  );
+                })}
               </div>
             </div>
+          )}
 
-            {/* PDF viewer */}
-            {showPdf && (
-              <div className="w-full border-b border-gray-100" style={{ height: '600px' }}>
-                {pdfBlobUrl
-                  ? <iframe src={pdfBlobUrl} className="w-full h-full" title="Medical Report PDF" />
-                  : <div className="flex items-center justify-center h-full text-gray-400"><Loader2 className="h-6 w-6 animate-spin" /></div>
-                }
-              </div>
+          {/* Bottom CTA strip */}
+          <div className="relative z-10 flex h-12 items-center justify-center border-t border-slate-800 bg-slate-950/90 backdrop-blur">
+            <button
+              onClick={() => analyzeMut.mutate()}
+              disabled={analyzeMut.isPending}
+              className={`group inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/40 transition-all duration-200 hover:from-blue-500 hover:to-blue-400 hover:shadow-blue-500/60 disabled:opacity-60`}
+            >
+              {analyzeMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ScanLine className="h-4 w-4" />
+              )}
+              {analyzeMut.isPending
+                ? 'Analyzing…'
+                : analysis
+                  ? 'Re-analyze with AI'
+                  : 'Analyze with AI'}
+            </button>
+          </div>
+        </section>
+
+        {/* ═══════════════════ RIGHT: light report panel (45%) ═══════════════════ */}
+        <section className="flex w-[45%] min-w-0 flex-col bg-slate-50 text-slate-900">
+
+          {/* Patient context strip */}
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-5 text-xs">
+            <FileText className="h-4 w-4 text-blue-500" />
+            <span className="font-semibold text-slate-900">
+              {patient ? `${patient.lastName}, ${patient.firstName}` : '—'}
+            </span>
+            <span className="font-mono text-slate-500">{patient?.ehrId ?? '—'}</span>
+            <span className="text-slate-300">·</span>
+            <span className="font-mono text-slate-500">
+              {visit ? format(new Date(visit.visitDate), 'dd MMM yyyy') : '—'}
+            </span>
+            {existingReport && (
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-700">
+                <CheckCircle className="h-3 w-3" /> Report saved
+              </span>
             )}
+          </div>
 
-            {/* report content */}
-            {!showPdf && <div className="p-4 overflow-y-auto" style={{ maxHeight: '600px' }}>
-              {/* Doctor notes input */}
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor notes</label>
+          {/* PDF viewer takes over when active */}
+          {showPdf && (
+            <div className="flex flex-1 flex-col bg-slate-100">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-2">
+                <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                  Saved report · PDF
+                </span>
+                <button
+                  onClick={() => setShowPdf(false)}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <X className="h-3.5 w-3.5" /> Close
+                </button>
+              </div>
+              <div className="flex-1">
+                {pdfBlobUrl ? (
+                  <iframe src={pdfBlobUrl} className="h-full w-full" title="Medical Report PDF" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-slate-400">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Report authoring (hidden when PDF active) */}
+          {!showPdf && (
+            <>
+              {/* Patient key info card */}
+              {patient && (
+                <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-3">
+                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                    Patient
+                  </div>
+                  <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                    <div>
+                      <p className="text-sm font-bold tracking-tight text-slate-900">
+                        {patient.lastName}, {patient.firstName}
+                      </p>
+                      <p className="mt-0.5 font-mono text-[11px] text-slate-500">{patient.ehrId}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                        <span className="mr-1 text-slate-400">Age</span>
+                        {patient.age}
+                      </span>
+                      <span
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+                          patient.gender === 'MALE'
+                            ? 'border-blue-200 bg-blue-50 text-blue-700'
+                            : patient.gender === 'FEMALE'
+                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        {patient.gender}
+                      </span>
+                      {visit && (
+                        <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-slate-600">
+                          {format(new Date(visit.visitDate), 'dd MMM yyyy')}
+                        </span>
+                      )}
+                      {analysis && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                            analysis.segments.length > 0
+                              ? 'border-rose-200 bg-rose-50 text-rose-700'
+                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          }`}
+                        >
+                          {analysis.segments.length > 0
+                            ? `${analysis.segments.length} fracture${analysis.segments.length !== 1 ? 's' : ''} detected`
+                            : 'No fractures'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Doctor notes */}
+              <div className="border-b border-slate-200 bg-white px-5 py-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                    Doctor Notes
+                  </label>
+                  {doctorNotes && (
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {doctorNotes.length} chars
+                    </span>
+                  )}
+                </div>
                 <textarea
                   value={doctorNotes}
                   onChange={(e) => setDoctorNotes(e.target.value)}
-                  placeholder="Add clinical observations, symptoms, or notes to include in the report…"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                  placeholder="Clinical observations, symptoms, referring information…"
+                  className="w-full resize-none border-0 bg-transparent p-0 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
                   rows={3}
                 />
               </div>
-              {reportMut.isError && (
-                <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  {(reportMut.error as any)?.message ?? 'Report generation failed'}
-                </div>
-              )}
 
-              {reportMut.isPending && (
-                <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-                  <Loader2 className="h-8 w-8 animate-spin mb-3" />
-                  <p className="text-sm">Generating report…</p>
-                </div>
-              )}
+              {/* Report body — scrollable */}
+              <div className="flex-1 overflow-y-auto bg-slate-50 px-5 py-4">
+                {reportMut.isError && (
+                  <div className="mb-3 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    {(reportMut.error as any)?.message ?? 'Report generation failed'}
+                  </div>
+                )}
 
-              {!reportMd && !reportMut.isPending && (
-                <div className="flex flex-col items-center justify-center py-12 text-center text-gray-400">
-                  <FileText className="h-8 w-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium text-gray-500">No report yet</p>
-                  <p className="text-xs mt-1">Click "Generate Report" to create an AI medical report for this X-ray</p>
-                </div>
-              )}
-
-              {reportMd && !reportMut.isPending && (
-                <>
-                  {reportTab === 'preview' ? (
-                    <div className="prose prose-sm max-w-none
-                      text-gray-700 leading-relaxed
-                      prose-headings:font-semibold prose-headings:text-gray-900 prose-headings:mt-4 prose-headings:mb-1
-                      prose-h1:text-sm prose-h1:uppercase prose-h1:tracking-wide prose-h1:text-brand-700 prose-h1:border-b prose-h1:border-brand-100 prose-h1:pb-1
-                      prose-h2:text-sm prose-h2:text-gray-800
-                      prose-h3:text-xs prose-h3:text-gray-600 prose-h3:uppercase prose-h3:tracking-wide
-                      prose-p:my-1 prose-p:text-xs
-                      prose-li:text-xs prose-li:my-0
-                      prose-ul:my-1 prose-ol:my-1
-                      prose-strong:text-gray-900 prose-strong:font-semibold
-                      prose-hr:my-3 prose-hr:border-gray-200">
-                      <ReactMarkdown>{reportMd}</ReactMarkdown>
+                {reportMut.isPending && (
+                  <div className="animate-fade-in-up rounded-lg border border-blue-200 bg-white p-5">
+                    <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-widest text-blue-600">
+                      <Sparkles className="h-3 w-3" />
+                      Wilhelm AI
                     </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      <textarea
-                        value={reportMd}
-                        onChange={(e) => setReportMd(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 p-3 font-mono text-xs text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
-                        rows={20}
-                      />
-                      <button
-                        onClick={() => setReportTab('preview')}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-700">
-                        <CheckCircle className="h-3.5 w-3.5" /> Done editing
-                      </button>
+                    <p className="font-serif text-sm text-slate-700">
+                      Generating radiology report
+                      <span className="animate-caret ml-0.5 inline-block h-4 w-[2px] -mb-0.5 bg-blue-500" />
+                    </p>
+                    <div className="mt-4 space-y-2">
+                      {[90, 70, 85, 55].map((w, i) => (
+                        <div
+                          key={i}
+                          className="h-2 animate-pulse rounded bg-slate-200"
+                          style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
+                        />
+                      ))}
                     </div>
+                  </div>
+                )}
+
+                {!reportMd && !reportMut.isPending && (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white">
+                      <FileText className="h-5 w-5 text-slate-400" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-700">No report yet</p>
+                    <p className="mt-1 max-w-xs text-xs text-slate-500">
+                      Review the X-ray findings, then click Generate Report to have Wilhelm draft a
+                      structured radiology report.
+                    </p>
+                    <button
+                      onClick={() => reportMut.mutate()}
+                      disabled={reportMut.isPending || !patient}
+                      className="mt-6 inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:from-blue-500 hover:to-blue-400 disabled:opacity-60"
+                    >
+                      <Sparkles className="h-4 w-4" /> Generate Report
+                    </button>
+                  </div>
+                )}
+
+                {reportMd && !reportMut.isPending && (
+                  <div className="animate-fade-in-up">
+                    {reportTab === 'preview' ? (
+                      <article
+                        className="font-serif text-[13.5px] leading-[1.65] text-slate-800
+                          [&_h1]:mb-2 [&_h1]:mt-5 [&_h1]:font-sans [&_h1]:text-base [&_h1]:font-bold [&_h1]:tracking-tight [&_h1]:text-slate-900
+                          [&_h2]:mb-1.5 [&_h2]:mt-5 [&_h2]:font-sans [&_h2]:text-sm [&_h2]:font-bold [&_h2]:uppercase [&_h2]:tracking-widest [&_h2]:text-blue-700
+                          [&_h3]:mb-1 [&_h3]:mt-4 [&_h3]:font-sans [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-slate-900
+                          [&_p]:my-2
+                          [&_strong]:font-semibold [&_strong]:text-slate-900
+                          [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5
+                          [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5
+                          [&_li]:my-1
+                          [&_hr]:my-4 [&_hr]:border-t [&_hr]:border-slate-200
+                          [&_em]:italic [&_em]:text-slate-600"
+                      >
+                        <ReactMarkdown>{reportMd}</ReactMarkdown>
+                      </article>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          value={reportMd}
+                          onChange={(e) => setReportMd(e.target.value)}
+                          className="w-full rounded-md border border-slate-200 bg-white p-3 font-mono text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                          rows={24}
+                        />
+                        <button
+                          onClick={() => setReportTab('preview')}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" /> Done editing
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky export footer */}
+              <div className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 bg-white px-5 py-3">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+                  {reportMd && (
+                    <>
+                      <Sparkles className="h-3 w-3 text-blue-500" />
+                      <span>Generated by Wilhelm AI · {category.replace(/_/g, ' ')}</span>
+                    </>
                   )}
-                </>
-              )}
-            </div>}
-          </div>
-        </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {reportMd && (
+                    <button
+                      onClick={() => setReportTab((t) => (t === 'edit' ? 'preview' : 'edit'))}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      {reportTab === 'edit' ? 'Preview' : 'Edit'}
+                    </button>
+                  )}
+                  {existingReport && (
+                    <>
+                      <a
+                        href={reportPdfUrl!}
+                        download={reportPdfName}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Download
+                      </a>
+                      <button
+                        onClick={() => setShowPdf(true)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        View PDF
+                      </button>
+                    </>
+                  )}
+                  {reportMd && (
+                    <button
+                      onClick={() => saveReportMut.mutate()}
+                      disabled={saveReportMut.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/30 hover:bg-blue-500 disabled:opacity-60"
+                    >
+                      {saveReportMut.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : saveReportMut.isSuccess ? (
+                        <CheckCircle className="h-3.5 w-3.5" />
+                      ) : (
+                        <Save className="h-3.5 w-3.5" />
+                      )}
+                      {saveReportMut.isPending ? 'Saving…' : saveReportMut.isSuccess ? 'Saved' : 'Save as PDF'}
+                    </button>
+                  )}
+                  {reportMd && !reportMut.isPending && (
+                    <button
+                      onClick={() => reportMut.mutate()}
+                      disabled={reportMut.isPending}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/40 hover:from-blue-500 hover:to-blue-400"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Regenerate
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
-    </div>
+    </>
   );
 }
