@@ -355,6 +355,17 @@ export default function XrayDetailPage() {
 
   const cursor = mode === 'draw' ? 'crosshair' : mode === 'delete' ? 'pointer' : 'default';
 
+  // ── magnifier state ────────────────────────────────────────────────────────
+  const MAGNIFIER_SIZE = 160;
+  const MAGNIFIER_ZOOM = 3;
+  const [magnifier, setMagnifier] = useState<{ x: number; y: number } | null>(null);
+
+  const onMouseMoveImg = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (mode !== 'view') return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMagnifier({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
   if (isLoading) {
     return (
       <div className="flex h-[calc(100vh-3rem)] items-center justify-center bg-[#0A0F1E]">
@@ -510,6 +521,8 @@ export default function XrayDetailPage() {
             <div
               className="relative select-none"
               style={{ width: `${zoom * 100}%`, minHeight: '100%' }}
+              onMouseMove={onMouseMoveImg}
+              onMouseLeave={() => setMagnifier(null)}
             >
               <img
                 ref={imgRef}
@@ -536,6 +549,31 @@ export default function XrayDetailPage() {
                   onPointerUp={onPointerUp}
                 />
               )}
+
+              {/* Magnifier lens */}
+              {magnifier && mode === 'view' && imgNaturalSize && (() => {
+                const containerW = (canvasRef.current?.offsetWidth ?? imgNaturalSize.w) ;
+                const containerH = (canvasRef.current?.offsetHeight ?? imgNaturalSize.h);
+                const bgW = containerW * MAGNIFIER_ZOOM;
+                const bgH = containerH * MAGNIFIER_ZOOM;
+                const bgX = -(magnifier.x * MAGNIFIER_ZOOM - MAGNIFIER_SIZE / 2);
+                const bgY = -(magnifier.y * MAGNIFIER_ZOOM - MAGNIFIER_SIZE / 2);
+                return (
+                  <div
+                    className="pointer-events-none absolute z-30 rounded-full border-2 border-blue-400/70 shadow-xl shadow-black/60 overflow-hidden"
+                    style={{
+                      width: MAGNIFIER_SIZE,
+                      height: MAGNIFIER_SIZE,
+                      left: magnifier.x - MAGNIFIER_SIZE / 2,
+                      top: magnifier.y - MAGNIFIER_SIZE - 16,
+                      backgroundImage: `url(${imgUrl})`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundSize: `${bgW}px ${bgH}px`,
+                      backgroundPosition: `${bgX}px ${bgY}px`,
+                    }}
+                  />
+                );
+              })()}
 
               {/* Scan line animation during analysis */}
               {analyzeMut.isPending && (
