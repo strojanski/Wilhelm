@@ -55,7 +55,7 @@ class VisitController(private val visitService: VisitService) {
 
     @GetMapping("/{visitId}/report/{filename}")
     fun downloadReport(@PathVariable visitId: Long, @PathVariable filename: String): ResponseEntity<Resource> =
-        visitService.downloadDocument(visitId, DocumentType.REPORT, filename).asAttachment(filename, MediaType.APPLICATION_PDF)
+        visitService.downloadDocument(visitId, DocumentType.REPORT, filename).asInline(filename, MediaType.APPLICATION_PDF)
 
     @PutMapping("/{visitId}/xray", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
     fun uploadXray(@PathVariable visitId: Long, @RequestParam("file") file: MultipartFile): VisitResponse =
@@ -83,5 +83,11 @@ class VisitController(private val visitService: VisitService) {
         ResponseEntity.ok()
             .contentType(mediaType)
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"$filename\"")
+            .body(this)
+
+    private fun Resource.asInline(filename: String, mediaType: MediaType): ResponseEntity<Resource> =
+        ResponseEntity.ok()
+            .contentType(mediaType)
+            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"$filename\"")
             .body(this)
 }

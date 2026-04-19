@@ -4,10 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronRight, Users, Scan, RotateCcw, ZoomIn, ZoomOut,
   Eye, EyeOff, Pencil, Trash2, X, Save, CheckCircle,
-  Loader2, AlertTriangle, FileText, Edit3,
+  Loader2, AlertTriangle, FileText, Edit3, Download,
 } from 'lucide-react';
 import { getPatient } from '../api/patients';
-import { getVisit, analyzeXray, saveAnnotations, getFileUrl } from '../api/visits';
+import { getVisit, analyzeXray, saveAnnotations, getFileUrl, uploadReport } from '../api/visits';
 import { analyzeWithLLM } from '../api/llm';
 import type { FractureSegment } from '../api/types';
 import Spinner from '../components/Spinner';
@@ -62,6 +62,24 @@ export default function XrayDetailPage() {
   // ── report state ───────────────────────────────────────────────────────────
   const [reportMd, setReportMd] = useState('');
   const [reportTab, setReportTab] = useState<'preview' | 'edit'>('preview');
+  const [showPdf, setShowPdf] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const reportPdfName = `${decodedFilename}_report.pdf`;
+  const existingReport = visit?.reportFiles?.includes(reportPdfName) ? reportPdfName : null;
+  const reportPdfUrl = existingReport ? getFileUrl(ehrId!, Number(visitId), 'report', existingReport) : null;
+  const mdPreviewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showPdf || !reportPdfUrl) return;
+    if (pdfBlobUrl) return; // already loaded
+    fetch(reportPdfUrl)
+      .then(r => r.blob())
+      .then(blob => setPdfBlobUrl(URL.createObjectURL(blob)));
+  }, [showPdf, reportPdfUrl]);
+
+  useEffect(() => {
+    return () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); };
+  }, [pdfBlobUrl]);
 
   // ── canvas refs ────────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -109,6 +127,39 @@ export default function XrayDetailPage() {
   const reportMut = useMutation({
     mutationFn: () => analyzeWithLLM(imgUrl, patientCtx),
     onSuccess: (md) => { setReportMd(md); setReportTab('preview'); },
+  });
+
+  const saveReportMut = useMutation({
+    mutationFn: async () => {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: html2canvas } = await import('html2canvas');
+      const el = mdPreviewRef.current;
+      if (!el) throw new Error('No report content');
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgW = pageW - 20;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      let y = 10;
+      let remaining = imgH;
+      const dataUrl = canvas.toDataURL('image/png');
+      while (remaining > 0) {
+        const sliceH = Math.min(remaining, pageH - 20);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = (sliceH * canvas.width) / imgW;
+        const sliceCtx = sliceCanvas.getContext('2d')!;
+        sliceCtx.drawImage(canvas, 0, (imgH - remaining) * canvas.width / imgW, canvas.width, sliceCanvas.height, 0, 0, canvas.width, sliceCanvas.height);
+        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', 10, y, imgW, sliceH);
+        remaining -= sliceH;
+        if (remaining > 0) { pdf.addPage(); y = 10; }
+      }
+      const blob = pdf.output('blob');
+      const file = new File([blob], reportPdfName, { type: 'application/pdf' });
+      return uploadReport(ehrId!, Number(visitId), file);
+    },
+    onSuccess: (updated) => { qc.setQueryData(visitQueryKey, updated); setPdfBlobUrl(null); setShowPdf(true); },
   });
 
   // ── canvas render ──────────────────────────────────────────────────────────
@@ -247,6 +298,12 @@ export default function XrayDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Hidden div used to render markdown for PDF export */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0, width: '794px', background: '#fff', padding: '40px' }}>
+        <div ref={mdPreviewRef} className="prose prose-sm max-w-none text-gray-800">
+          <ReactMarkdown>{reportMd}</ReactMarkdown>
+        </div>
+      </div>
       {/* Breadcrumb */}
       <nav className="flex flex-wrap items-center gap-1 text-sm text-gray-500">
         <Link to="/patients" className="flex items-center gap-1 hover:text-brand-600">
@@ -268,7 +325,7 @@ export default function XrayDetailPage() {
       <div className="flex gap-4 items-start" style={{ minHeight: 0 }}>
 
         {/* ── LEFT: image + fracture controls ── */}
-        <div className="flex flex-col gap-3 flex-1 min-w-0">
+        <div className="flex flex-col gap-3 min-w-0" style={{ width: '45%' }}>
           <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
             {/* toolbar */}
             <div className="flex flex-wrap items-center gap-1.5 border-b border-gray-100 px-4 py-3">
@@ -401,13 +458,30 @@ export default function XrayDetailPage() {
         </div>
 
         {/* ── RIGHT: report panel ── */}
-        <div className="w-96 shrink-0 flex flex-col gap-3">
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
           <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
             {/* header */}
             <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <FileText className="h-4 w-4 text-brand-500" />
                 Medical Report
+                {existingReport && (
+                  <>
+                    <button
+                      onClick={() => setShowPdf(v => !v)}
+                      className={`ml-2 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium transition-colors ${showPdf ? 'bg-brand-100 text-brand-700 border border-brand-200' : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-brand-50'}`}>
+                      <FileText className="h-3 w-3" />
+                      {showPdf ? 'Hide PDF' : 'View PDF'}
+                    </button>
+                    <a
+                      href={reportPdfUrl!}
+                      download={reportPdfName}
+                      className="ml-1 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200 transition-colors">
+                      <Download className="h-3 w-3" />
+                      Download
+                    </a>
+                  </>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
                 {reportMd && (
@@ -416,6 +490,15 @@ export default function XrayDetailPage() {
                     className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${reportTab === 'edit' ? 'bg-brand-50 text-brand-700 border border-brand-200' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                     <Edit3 className="h-3.5 w-3.5" />
                     {reportTab === 'edit' ? 'Preview' : 'Edit'}
+                  </button>
+                )}
+                {reportMd && (
+                  <button
+                    onClick={() => saveReportMut.mutate()}
+                    disabled={saveReportMut.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60">
+                    {saveReportMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveReportMut.isSuccess ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <Save className="h-3.5 w-3.5" />}
+                    {saveReportMut.isPending ? 'Saving…' : saveReportMut.isSuccess ? 'Saved' : 'Save'}
                   </button>
                 )}
                 <button
@@ -428,8 +511,18 @@ export default function XrayDetailPage() {
               </div>
             </div>
 
+            {/* PDF viewer */}
+            {showPdf && (
+              <div className="w-full border-b border-gray-100" style={{ height: '600px' }}>
+                {pdfBlobUrl
+                  ? <iframe src={pdfBlobUrl} className="w-full h-full" title="Medical Report PDF" />
+                  : <div className="flex items-center justify-center h-full text-gray-400"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                }
+              </div>
+            )}
+
             {/* report content */}
-            <div className="p-4">
+            {!showPdf && <div className="p-4 overflow-y-auto" style={{ maxHeight: '600px' }}>
               {reportMut.isError && (
                 <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -455,10 +548,17 @@ export default function XrayDetailPage() {
               {reportMd && !reportMut.isPending && (
                 <>
                   {reportTab === 'preview' ? (
-                    <div className="prose prose-sm max-w-none text-gray-800
-                      prose-headings:font-semibold prose-headings:text-gray-900
-                      prose-h1:text-base prose-h2:text-sm prose-h3:text-xs
-                      prose-li:text-gray-700 prose-strong:text-gray-900">
+                    <div className="prose prose-sm max-w-none
+                      text-gray-700 leading-relaxed
+                      prose-headings:font-semibold prose-headings:text-gray-900 prose-headings:mt-4 prose-headings:mb-1
+                      prose-h1:text-sm prose-h1:uppercase prose-h1:tracking-wide prose-h1:text-brand-700 prose-h1:border-b prose-h1:border-brand-100 prose-h1:pb-1
+                      prose-h2:text-sm prose-h2:text-gray-800
+                      prose-h3:text-xs prose-h3:text-gray-600 prose-h3:uppercase prose-h3:tracking-wide
+                      prose-p:my-1 prose-p:text-xs
+                      prose-li:text-xs prose-li:my-0
+                      prose-ul:my-1 prose-ol:my-1
+                      prose-strong:text-gray-900 prose-strong:font-semibold
+                      prose-hr:my-3 prose-hr:border-gray-200">
                       <ReactMarkdown>{reportMd}</ReactMarkdown>
                     </div>
                   ) : (
@@ -478,7 +578,7 @@ export default function XrayDetailPage() {
                   )}
                 </>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       </div>

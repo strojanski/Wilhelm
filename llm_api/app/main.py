@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import Settings, get_settings
 from app.schemas import AnalyzeResponse, HealthResponse, TranscribeResponse
@@ -84,7 +84,7 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
 # ---------------------------------------------------------------------------
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze", response_class=PlainTextResponse)
 async def analyze(
     settings: Annotated[Settings, Depends(get_settings)],
     llm: Annotated[LLMService, Depends(get_llm_service)],
@@ -97,7 +97,7 @@ async def analyze(
         str | None,
         Form(description='Optional JSON string with extra fields, e.g. \'{"foo": "bar"}\''),
     ] = None,
-) -> AnalyzeResponse:
+) -> str:
     return """
 # Department of Traumatology
 
