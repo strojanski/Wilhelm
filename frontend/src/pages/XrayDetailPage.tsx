@@ -61,6 +61,7 @@ export default function XrayDetailPage() {
 
   // ── report state ───────────────────────────────────────────────────────────
   const [reportMd, setReportMd] = useState('');
+  const [doctorNotes, setDoctorNotes] = useState('');
   const [reportTab, setReportTab] = useState<'preview' | 'edit'>('preview');
   const [showPdf, setShowPdf] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
@@ -120,12 +121,19 @@ export default function XrayDetailPage() {
     onSuccess: (updated) => { qc.setQueryData(visitQueryKey, updated); setDirty(false); },
   });
 
-  const patientCtx = patient
-    ? `Patient: ${patient.firstName} ${patient.lastName}, age ${patient.age}, ${patient.gender}. Analyse this X-ray for fractures and produce a structured medical radiology report in Markdown.`
-    : 'Analyse this X-ray for fractures and produce a structured radiology report in Markdown.';
+  const triagePdfUrl = visit?.triageFiles?.length && patient
+    ? getFileUrl(ehrId!, Number(visitId), 'triage', visit.triageFiles[0])
+    : null;
+
+  const category = analysis
+    ? `fracture_probability_${Math.round((analysis.segments[0]?.iouScore ?? 0) * 100)}pct_confidence`
+    : 'radiology';
 
   const reportMut = useMutation({
-    mutationFn: () => analyzeWithLLM(imgUrl, patientCtx),
+    mutationFn: () => {
+      return analyzeWithLLM(doctorNotes || 'Produce a structured medical radiology report in Markdown.', patient!, category, triagePdfUrl);
+    },
+    enabled: !!patient,
     onSuccess: (md) => { setReportMd(md); setReportTab('preview'); },
   });
 
@@ -510,6 +518,20 @@ export default function XrayDetailPage() {
                 </button>
               </div>
             </div>
+
+            {/* Doctor notes input */}
+            {!showPdf && (
+              <div className="px-4 pt-3 border-b border-gray-100">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor notes</label>
+                <textarea
+                  value={doctorNotes}
+                  onChange={(e) => setDoctorNotes(e.target.value)}
+                  placeholder="Add clinical observations, symptoms, or notes to include in the report…"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                  rows={3}
+                />
+              </div>
+            )}
 
             {/* PDF viewer */}
             {showPdf && (
