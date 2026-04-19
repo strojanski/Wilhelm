@@ -23,7 +23,7 @@ section can be populated with clinically relevant detail, do so.
 **Represented to:** Dr. Vitalie Chirila
 **Represented by:** Fadi Arram
 **Group:** 1450
-**Report date:** <report_date>
+**Report date:** <report_date, or 20.04.2026, 12:37 PM if not provided>
 
 ---
 
