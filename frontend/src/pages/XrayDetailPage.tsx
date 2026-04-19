@@ -61,6 +61,7 @@ export default function XrayDetailPage() {
 
   // ── report state ───────────────────────────────────────────────────────────
   const [reportMd, setReportMd] = useState('');
+  const [doctorNotes, setDoctorNotes] = useState('');
   const [reportTab, setReportTab] = useState<'preview' | 'edit'>('preview');
   const [showPdf, setShowPdf] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
@@ -120,12 +121,19 @@ export default function XrayDetailPage() {
     onSuccess: (updated) => { qc.setQueryData(visitQueryKey, updated); setDirty(false); },
   });
 
-  const patientCtx = patient
-    ? `Patient: ${patient.firstName} ${patient.lastName}, age ${patient.age}, ${patient.gender}. Analyse this X-ray for fractures and produce a structured medical radiology report in Markdown.`
-    : 'Analyse this X-ray for fractures and produce a structured radiology report in Markdown.';
+  const triagePdfUrl = visit?.triageFiles?.length && patient
+    ? getFileUrl(ehrId!, Number(visitId), 'triage', visit.triageFiles[0])
+    : null;
+
+  const category = analysis
+    ? `fracture_probability_${Math.round((analysis.segments[0]?.iouScore ?? 0) * 100)}pct_confidence`
+    : 'radiology';
 
   const reportMut = useMutation({
-    mutationFn: () => analyzeWithLLM(imgUrl, patientCtx),
+    mutationFn: () => {
+      return analyzeWithLLM(doctorNotes || 'Produce a structured medical radiology report in Markdown.', patient!, category, triagePdfUrl);
+    },
+    enabled: !!patient,
     onSuccess: (md) => { setReportMd(md); setReportTab('preview'); },
   });
 
@@ -143,7 +151,6 @@ export default function XrayDetailPage() {
       const imgH = (canvas.height * imgW) / canvas.width;
       let y = 10;
       let remaining = imgH;
-      const dataUrl = canvas.toDataURL('image/png');
       while (remaining > 0) {
         const sliceH = Math.min(remaining, pageH - 20);
         const sliceCanvas = document.createElement('canvas');
@@ -299,9 +306,63 @@ export default function XrayDetailPage() {
   return (
     <div className="flex flex-col gap-4">
       {/* Hidden div used to render markdown for PDF export */}
-      <div style={{ position: 'fixed', left: '-9999px', top: 0, width: '794px', background: '#fff', padding: '40px' }}>
-        <div ref={mdPreviewRef} className="prose prose-sm max-w-none text-gray-800">
-          <ReactMarkdown>{reportMd}</ReactMarkdown>
+      <div style={{ position: 'fixed', left: '-9999px', top: 0, width: '794px', background: '#fff' }}>
+        <div ref={mdPreviewRef} style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: '#1a1a2e', background: '#fff', padding: '48px 56px' }}>
+          {/* Header */}
+          <div style={{ borderBottom: '3px solid #1e40af', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e3a8a', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+                Wilhelm Radiology
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+                AI-Assisted Fracture Detection Report
+              </div>
+            </div>
+            <div style={{ textAlign: 'right', fontSize: '11px', color: '#475569', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+              <div style={{ fontWeight: 600 }}>Date: {format(new Date(), 'MMMM d, yyyy')}</div>
+              {patient && (
+                <>
+                  <div>Patient: {patient.firstName} {patient.lastName}</div>
+                  <div>Age: {patient.age} · Gender: {patient.gender}</div>
+                  <div style={{ color: '#94a3b8', marginTop: '2px' }}>ID: {patient.ehrId}</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* X-ray reference */}
+          <div style={{ background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '10px 14px', marginBottom: '24px', fontSize: '11px', color: '#1e40af', fontFamily: 'Arial, Helvetica, sans-serif', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontWeight: 700 }}>X-ray file:</span>
+            <span style={{ fontFamily: 'monospace', background: '#dbeafe', padding: '1px 6px', borderRadius: '3px' }}>{decodedFilename}</span>
+            {analysis && (
+              <span style={{ marginLeft: 'auto', color: segments.length > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
+                {segments.length > 0 ? `⚠ ${segments.length} fracture region${segments.length > 1 ? 's' : ''} detected` : '✓ No fractures detected'}
+              </span>
+            )}
+          </div>
+
+          {/* Markdown body */}
+          <div style={{ fontSize: '12px', lineHeight: 1.75, color: '#1e293b' }}
+            dangerouslySetInnerHTML={{ __html: (() => {
+              // minimal inline markdown → html for PDF
+              let html = reportMd
+                .replace(/^# (.+)$/gm, '<h1 style="font-size:17px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #bfdbfe;padding-bottom:5px;margin:24px 0 10px;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:0.03em">$1</h1>')
+                .replace(/^## (.+)$/gm, '<h2 style="font-size:14px;font-weight:700;color:#1e40af;margin:18px 0 6px;font-family:Arial,sans-serif">$1</h2>')
+                .replace(/^### (.+)$/gm, '<h3 style="font-size:12px;font-weight:700;color:#334155;margin:14px 0 4px;font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:0.05em">$1</h3>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#0f172a;font-weight:700">$1</strong>')
+                .replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0" />')
+                .replace(/^- (.+)$/gm, '<li style="margin:3px 0;padding-left:4px">$1</li>')
+                .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul style="margin:6px 0;padding-left:20px;list-style:disc">${m}</ul>`)
+                .replace(/^(?!<[hul]|<hr|<strong)(.+)$/gm, '<p style="margin:6px 0">$1</p>');
+              return html;
+            })() }}
+          />
+
+          {/* Footer */}
+          <div style={{ borderTop: '1px solid #e2e8f0', marginTop: '40px', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+            <span>Generated by Wilhelm AI · {format(new Date(), 'yyyy-MM-dd HH:mm')}</span>
+            <span>Confidential — For clinical use only</span>
+          </div>
         </div>
       </div>
       {/* Breadcrumb */}
@@ -523,6 +584,17 @@ export default function XrayDetailPage() {
 
             {/* report content */}
             {!showPdf && <div className="p-4 overflow-y-auto" style={{ maxHeight: '600px' }}>
+              {/* Doctor notes input */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Doctor notes</label>
+                <textarea
+                  value={doctorNotes}
+                  onChange={(e) => setDoctorNotes(e.target.value)}
+                  placeholder="Add clinical observations, symptoms, or notes to include in the report…"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-800 placeholder-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                  rows={3}
+                />
+              </div>
               {reportMut.isError && (
                 <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">
                   <AlertTriangle className="h-4 w-4 shrink-0" />

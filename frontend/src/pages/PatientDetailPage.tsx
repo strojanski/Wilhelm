@@ -19,7 +19,7 @@ export default function PatientDetailPage() {
   const qc = useQueryClient();
   const [showDeletePatient, setShowDeletePatient] = useState(false);
   const [visitToDelete, setVisitToDelete] = useState<Visit | null>(null);
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState(format(new Date(), 'yyyy-MM-dd'));
 
   const { data: patient, isLoading: loadingPatient } = useQuery({
     queryKey: ['patient', ehrId],
