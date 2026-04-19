@@ -29,6 +29,7 @@ export const analyzeWithLLM = async (
     }
   }
 
+  console.log(form)
   const resp = await fetch(`${LLM_BASE}/analyze`, { method: 'POST', body: form });
   if (!resp.ok) throw new Error(`LLM error ${resp.status}: ${await resp.text()}`);
   return resp.text();

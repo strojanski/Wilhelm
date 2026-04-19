@@ -1,10 +1,47 @@
 services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: patients
+      POSTGRES_USER: wilhelm
+      POSTGRES_PASSWORD: wilhelm_pass
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wilhelm -d patients"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: backend/WilhelmBackend
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8081
+      APP_BASE_URL: http://app:8081
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/patients
+      SPRING_DATASOURCE_USERNAME: wilhelm
+      SPRING_DATASOURCE_PASSWORD: wilhelm_pass
+      APP_REPORTS_DIRECTORY: /opt/wilhelm-server/reports
+      APP_AI_API_URL: http://vision-api:8000
+    volumes:
+      - reports:/opt/wilhelm-server/reports
+
   vision-api:
     build: .
     working_dir: /app/vision
     command: uvicorn vision_api:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
+    depends_on:
+      - app
     volumes:
       - ./vision_segmentation/SAM-Med2D:/app/vision_segmentation/SAM-Med2D:ro
       - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
@@ -41,3 +78,7 @@ services:
       LOCAL_MODE: ${LOCAL_MODE:-false}
     depends_on:
       - vision-api
+
+volumes:
+  db_data:
+  reports:

@@ -27,8 +27,8 @@ PASS = "\033[32mPASS\033[0m"
 FAIL = "\033[31mFAIL\033[0m"
 SKIP = "\033[33mSKIP\033[0m"
 
-# Public FracAtlas test image (tiny, confirmed accessible)
-TEST_IMAGE_URL = "https://raw.githubusercontent.com/Dataset-Champions/FracAtlas/main/images/Non-fractured/IMG0000001.jpg"
+# Public domain X-ray image for testing
+TEST_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/b/be/AP_wrist_radiology.jpg/320px-AP_wrist_radiology.jpg"
 
 
 def _get(url: str) -> dict:
