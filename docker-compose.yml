@@ -79,6 +79,37 @@ services:
     depends_on:
       - vision-api
 
+  llm-api:
+    build:
+      context: llm_api
+      dockerfile: Dockerfile
+    image: gemma-api:latest
+    container_name: gemma-api
+    env_file:
+      - llm_api/.env
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app/frontend
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8081/api
+      VITE_LLM_URL: http://localhost:8082
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app/frontend
+      - frontend_node_modules:/app/frontend/node_modules
+    depends_on:
+      - app
+      - llm-api
+
+
 volumes:
   db_data:
   reports:
+  frontend_node_modules:
