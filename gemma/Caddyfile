@@ -1,0 +1,28 @@
+# Listens on 8080 inside the container; published to host via docker-compose.
+:8080 {
+	# Health check (no auth) — handy for probes.
+	handle /health {
+		respond "ok" 200
+	}
+
+	# Require: Authorization: Bearer ${LLM_API_KEY}
+	@authorized header Authorization "Bearer {$LLM_API_KEY}"
+
+	handle @authorized {
+		# Forward everything to Ollama. Both /v1/* (OpenAI-compatible)
+		# and /api/* (native Ollama) endpoints will work.
+		reverse_proxy ollama:11434 {
+			# Long timeouts so streaming + big generations don't get cut.
+			transport http {
+				read_timeout 30m
+				write_timeout 30m
+			}
+		}
+	}
+
+	# Any unauthenticated request gets 401.
+	handle {
+		header Content-Type "application/json"
+		respond `{"error":"unauthorized"}` 401
+	}
+}
