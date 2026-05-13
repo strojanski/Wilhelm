@@ -43,7 +43,6 @@ services:
     depends_on:
       - app
     volumes:
-      - ./vision_segmentation/SAM-Med2D:/app/vision_segmentation/SAM-Med2D:ro
       - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
     environment:
       MODEL_ROOT: /app
