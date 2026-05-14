@@ -43,7 +43,6 @@ services:
     depends_on:
       - app
     volumes:
-      - ./vision_segmentation/SAM-Med2D:/app/vision_segmentation/SAM-Med2D:ro
       - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
     environment:
       MODEL_ROOT: /app
@@ -79,6 +78,64 @@ services:
     depends_on:
       - vision-api
 
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    env_file:
+      - gemma/.env
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_FLASH_ATTENTION=1
+    expose:
+      - "11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  model-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file:
+      - gemma/.env
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling model: $$LLM_MODEL"
+        ollama pull "$$LLM_MODEL"
+        echo "Model ready."
+    restart: "no"
+
+  ollama-proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "${PROXY_PORT:-8084}:8080"
+    env_file:
+      - gemma/.env
+    volumes:
+      - ./gemma/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
   llm-api:
     build:
       context: llm_api
@@ -90,6 +147,8 @@ services:
     ports:
       - "8082:8080"
     restart: unless-stopped
+    depends_on:
+      - ollama-proxy
 
   frontend:
     image: node:20-alpine
@@ -113,3 +172,6 @@ volumes:
   db_data:
   reports:
   frontend_node_modules:
+  ollama_data:
+  caddy_data:
+  caddy_config:
