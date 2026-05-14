@@ -12,6 +12,11 @@
 		# Forward everything to Ollama. Both /v1/* (OpenAI-compatible)
 		# and /api/* (native Ollama) endpoints will work.
 		reverse_proxy ollama:11434 {
+			# CRITICAL for streaming: flush every write immediately.
+			# Without this, Caddy buffers SSE chunks and TTFT/TPOT
+			# measurements become meaningless (all tokens arrive at once).
+			flush_interval -1
+
 			# Long timeouts so streaming + big generations don't get cut.
 			transport http {
 				read_timeout 30m

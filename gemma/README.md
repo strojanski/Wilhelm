@@ -51,11 +51,11 @@ When that container exits with "Model ready." you're done.
 
 ```bash
 # List models exposed via the OpenAI surface
-curl -s http://localhost:8080/v1/models \
+curl -s http://localhost:8084/v1/models \
   -H "Authorization: Bearer $(grep LLM_API_KEY .env | cut -d= -f2)"
 
 # Chat completion
-curl -s http://localhost:8080/v1/chat/completions \
+curl -s http://localhost:8084/v1/chat/completions \
   -H "Authorization: Bearer $(grep LLM_API_KEY .env | cut -d= -f2)" \
   -H "Content-Type: application/json" \
   -d '{
@@ -72,15 +72,15 @@ The three variables in your `.env` are exactly the ones your other app
 already expects:
 
 ```dotenv
-LLM_BASE_URL=http://localhost:8080/v1
+LLM_BASE_URL=http://localhost:8084/v1
 LLM_API_KEY=<the long random string you chose>
 LLM_MODEL=gemma4:26b
 ```
 
 Drop those into the consuming app's `.env` and it will hit your local Gemma
 the same way it hits Gemini. If the consuming app runs in another container
-on the same Docker network, use `http://proxy:8080/v1` instead of
-`localhost`.
+on the same Docker network, use `http://proxy:8080/v1` (container port)
+instead of `localhost`.
 
 ## Switching models
 
@@ -134,7 +134,7 @@ docker compose down -v         # stop and delete model weights too
 
 - The Caddy proxy enforces the API key. **Do not** publish port 11434 directly
   — Ollama has no built-in auth.
-- For LAN access: in `.env` set `LLM_BASE_URL=http://<host-ip>:8080/v1`. The
+- For LAN access: in `.env` set `LLM_BASE_URL=http://<host-ip>:8083/v1`. The
   Caddy auth still protects it. For internet exposure, put a TLS-terminating
   proxy in front (Caddy can do this with one extra line if you have a domain).
 - `OLLAMA_FLASH_ATTENTION=1` is enabled by default — turn it off in the compose
