@@ -1,2 +1,10 @@
 vision_segmentation/SAM-Med2D/
-vision_segmentation/weights/
+.git/
+**/__pycache__/
+**/.pytest_cache/
+**/.ipynb_checkpoints/
+llm_api/.env
+vision_classifier/data/
+vision_classifier/medsiglip-448/
+vision_inference/output/
+bone_fracture_classifier_medsiglip.ipynb

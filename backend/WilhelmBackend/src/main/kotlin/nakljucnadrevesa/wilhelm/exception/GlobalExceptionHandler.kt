@@ -1,5 +1,6 @@
 package nakljucnadrevesa.wilhelm.exception
 
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -15,6 +16,7 @@ data class ErrorResponse(
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
+    private val logger = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
 
     @ExceptionHandler(PatientNotFoundException::class)
     fun handlePatientNotFound(ex: PatientNotFoundException): ResponseEntity<ErrorResponse> =
@@ -47,8 +49,18 @@ class GlobalExceptionHandler {
         )
 
     @ExceptionHandler(DocumentStorageException::class)
-    fun handleDocumentStorage(ex: DocumentStorageException): ResponseEntity<ErrorResponse> =
-        ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+    fun handleDocumentStorage(ex: DocumentStorageException): ResponseEntity<ErrorResponse> {
+        logger.error("Document Storage Error: ${ex.message}", ex)
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
             ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), "Storage Error", ex.message!!)
         )
+    }
+
+    @ExceptionHandler(Exception::class)
+    fun handleGeneric(ex: Exception): ResponseEntity<ErrorResponse> {
+        logger.error("Unexpected Error: ${ex.message}", ex)
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
+            ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR.value(), "Internal Error", ex.message ?: "Unknown error")
+        )
+    }
 }

@@ -132,6 +132,7 @@ class VisitService(
         }
 
         val imageUrl = "$baseUrl/api/patients/$ehrId/visits/$visitId/xray/$filename"
+        println("Calling AI API at $aiApiUrl/analyze-url with image_url: $imageUrl")
         val rest = RestTemplate()
         val headers = HttpHeaders().also { it.contentType = MediaType.APPLICATION_JSON }
         val body = mapOf("image_url" to imageUrl)
@@ -210,7 +211,9 @@ class VisitService(
     private fun parseAnnotations(json: String): Map<String, XrayAnalysis> =
         try {
             objectMapper.readValue(json)
-        } catch (_: Exception) {
+        } catch (ex: Exception) {
+            println("ERROR parsing annotations: ${ex.message}")
+            ex.printStackTrace()
             emptyMap()
         }
 

@@ -7,9 +7,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git libxcb1 libxext6 libx11-6 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only torch avoids pulling ~1.5GB of CUDA wheels.
-# Override with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 for GPU.
-ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+# CUDA torch is the default because the vision service is expected to run on
+# NVIDIA GPUs. Override with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cpu
+# for a smaller CPU-only image.
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cu128
+
+# Install huggingface_hub early so model downloads can be cached independently of other requirements
+RUN pip install huggingface_hub
+
+ARG MEDSIGLIP_MODEL_ID=google/medsiglip-448
+ENV MEDSIGLIP_MODEL_ID=${MEDSIGLIP_MODEL_ID}
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    --mount=type=secret,id=hf_token,required=true <<'PY'
+python - <<'INNER'
+import os
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+token_path = Path("/run/secrets/hf_token")
+token = token_path.read_text().strip()
+if not token:
+    raise SystemExit("HF_TOKEN build secret is empty.")
+
+snapshot_download(
+    repo_id=os.environ["MEDSIGLIP_MODEL_ID"],
+    local_dir="/app/vision_classifier/medsiglip-448",
+    local_dir_use_symlinks=False,
+    token=token,
+)
+INNER
+PY
 
 COPY vision/requirements.txt requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -25,3 +52,4 @@ RUN git clone --depth 1 --branch ${SAM_MED2D_REF} ${SAM_MED2D_REPO} /app/vision_
 
 COPY vision/ ./vision/
 COPY vision_classifier/ ./vision_classifier/
+COPY vision_segmentation/weights/ ./vision_segmentation/weights/

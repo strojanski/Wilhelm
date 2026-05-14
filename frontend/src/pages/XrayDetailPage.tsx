@@ -606,6 +606,19 @@ export default function XrayDetailPage() {
                   </div>
                 </div>
               )}
+
+              {/* Analysis complete, no fractures */}
+              {analysis && !analyzeMut.isPending && segments.length === 0 && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/70 px-6 py-5 text-center shadow-2xl backdrop-blur-sm">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+                      <CheckCircle className="h-6 w-6" />
+                    </div>
+                    <p className="text-base font-semibold text-emerald-100">No fractures detected</p>
+                    <p className="mt-1 text-sm text-emerald-400/80">AI analysis complete</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

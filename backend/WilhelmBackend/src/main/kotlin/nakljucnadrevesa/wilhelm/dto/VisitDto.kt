@@ -37,16 +37,5 @@ data class VisitResponse(
     val xrayAnnotations: Map<String, XrayAnalysis>
 )
 
-fun Visit.toResponse() = VisitResponse(
-    id = id,
-    patientEhrId = patient.ehrId,
-    visitDate = visitDate,
-    createdAt = createdAt,
-    triageFiles = triageFiles.toFileList(),
-    reportFiles = reportFiles.toFileList(),
-    xrayFiles   = xrayFiles.toFileList(),
-    xrayAnnotations = emptyMap()
-)
-
 private fun String.toFileList(): List<String> =
     if (isBlank()) emptyList() else split(",")

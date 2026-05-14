@@ -1,0 +1,41 @@
+{
+  "average_precision": 0.7568220273371995,
+  "class_balance": {
+    "fracture_rate": 0.17560617193240263,
+    "fractured": 717,
+    "non_fractured": 3366
+  },
+  "classifier_path": "vision_classifier\\fracture_classifier_v4.pkl",
+  "created_at": "2026-05-13T23:36:53.298664+00:00",
+  "embeddings_path": "vision_classifier\\data\\fracatlas_medsiglip_embeddings.npz",
+  "feature_dim": 1152,
+  "head": "mlp",
+  "model_id": "google/medsiglip-448",
+  "n_samples": 4083,
+  "n_test": 817,
+  "n_train": 3266,
+  "random_state": 42,
+  "roc_auc": 0.8980515033927496,
+  "search": {
+    "best_cv_average_precision": 0.808354152209262,
+    "best_cv_roc_auc": 0.9205424954562326,
+    "best_params": {
+      "alpha": 0.001,
+      "hidden_layer_sizes": [
+        1024
+      ],
+      "learning_rate_init": 0.002,
+      "random_state": 42
+    },
+    "cv_folds": 3,
+    "enabled": true,
+    "n_candidates": 24,
+    "results_path": "vision_classifier\\data\\mlp_search_v4.csv",
+    "scoring": "average_precision"
+  },
+  "target_recall": 0.9,
+  "test_size": 0.2,
+  "threshold": 0.05814150348305702,
+  "threshold_precision": 0.3412698412698413,
+  "threshold_recall": 0.9020979020979021
+}

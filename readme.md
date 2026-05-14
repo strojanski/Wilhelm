@@ -120,7 +120,9 @@ The backend calls the vision API for X-ray analysis at `/analyze-url`.
 
 From repository root:
 
-```bash
+```powershell
+# Accept https://huggingface.co/google/medsiglip-448 first.
+$env:HF_TOKEN="hf_..."
 docker compose up --build vision-api
 ```
 
@@ -178,8 +180,17 @@ docker build -t gemma-api .
 
 From repository root:
 
-```bash
-docker build -t wilhelm-vision .
+```powershell
+$env:HF_TOKEN="hf_..."
+docker build --secret id=hf_token,env=HF_TOKEN -t wilhelm-vision .
+```
+
+The vision image uses CUDA PyTorch by default. For CPU-only builds:
+
+```powershell
+$env:TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+$env:VISION_DEVICE="cpu"
+docker compose up --build vision-api
 ```
 
 ## Run with Docker (service-specific)
@@ -192,8 +203,9 @@ There are multiple compose files in this repo. Use the one that matches the serv
 
 Examples:
 
-```bash
+```powershell
 # Vision services from repo root
+$env:HF_TOKEN="hf_..."
 docker compose up --build
 
 # LLM API
