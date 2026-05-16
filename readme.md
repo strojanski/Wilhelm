@@ -196,42 +196,14 @@ Wilhelm is built on open models and an openly licensed dataset.
 
 Deeper component docs: `backend/WilhelmBackend/README.md`, `llm_api/README.md`, `vision/README.md`.
 
-## Fracture classifier modes
+### Optional: real-time MedSigLIP classifier
 
-The vision service supports two interchangeable fracture-classifier backends, selected
-with the `CLASSIFIER_MODE` environment variable.
+By default (`docker compose up`, no extra config) the vision service uses the
+cached-embeddings classifier — CPU-only, no Hugging Face token, no GPU.
 
-### `embeddings` (default)
-
-The default. Uses the precomputed embedding cache plus the sklearn classifier
-(`vision_classifier/fracture_classifier_v3_0.91auc.pkl`). Runs CPU-only, needs no
-Hugging Face token and no GPU. This is the setup used by `docker compose up` with no
-extra configuration — nothing to do.
-
-### `live` (optional, MedSigLIP)
-
-Real-time classification with the `google/medsiglip-448` MedSigLIP encoder. This is
-opt-in because it requires a Hugging Face access token (the MedSigLIP model is gated)
-and is intended to run on an NVIDIA GPU.
-
-Enable it by setting, in your environment / `.env`:
-
-```
-CLASSIFIER_MODE=live
-DOWNLOAD_MEDSIGLIP=true
-TORCH_INDEX=https://download.pytorch.org/whl/cu128
-VISION_DEVICE=cuda
-```
-
-and providing the token at build time:
-
-```
-HF_TOKEN=hf_xxx docker compose build vision-api tee-extension
-docker compose up
-```
-
-For a GPU machine you must also expose the GPU to the `vision-api` (and `tee-extension`) containers (e.g. a
-`docker-compose.override.yml` adding `gpus: all`). Without `DOWNLOAD_MEDSIGLIP=true`
-the MedSigLIP weights are not downloaded and the image stays CPU-sized; set
-`ALLOW_REMOTE_MEDSIGLIP=true` to let the service pull the model at runtime instead of
-at build time.
+For an optional upgrade to real-time `google/medsiglip-448` classification on an
+NVIDIA GPU, set `CLASSIFIER_MODE=live`, `DOWNLOAD_MEDSIGLIP=true`,
+`TORCH_INDEX=https://download.pytorch.org/whl/cu128`, `VISION_DEVICE=cuda` in your
+`.env`, then `HF_TOKEN=hf_xxx docker compose build vision-api tee-extension` (the
+MedSigLIP model is gated, so a Hugging Face token is required) and expose the GPU to
+the containers via a `docker-compose.override.yml` adding `gpus: all`.
