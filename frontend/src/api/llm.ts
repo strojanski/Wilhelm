@@ -7,17 +7,26 @@ export const analyzeWithLLM = async (
   patient: Patient,
   category: string,
   triagePdfUrl: string | null,
+  options?: {
+    imageFile?: File | null;
+    audioFile?: File | null;
+    audioLanguage?: string | null;
+  },
 ): Promise<string> => {
   const form = new FormData();
   const todaysDate = new Date().toLocaleDateString('en-CA');
+  // Append image first when present (Gemma recommends image first in multimodal messages)
+  if (options?.imageFile) {
+    form.append('image', options.imageFile);
+  }
   form.append('text', `today's date is: ${todaysDate}\n${text}`);
   form.append('category', category);
   form.append('user_id', patient.ehrId);
   form.append('metadata_json', JSON.stringify({
     firstName: patient.firstName,
-    lastName:  patient.lastName,
-    age:       patient.age,
-    gender:    patient.gender,
+    lastName: patient.lastName,
+    age: patient.age,
+    gender: patient.gender,
   }));
 
   if (triagePdfUrl) {
@@ -27,6 +36,16 @@ export const analyzeWithLLM = async (
       const filename = triagePdfUrl.split('/').pop() ?? 'triage.pdf';
       form.append('pdf', new File([blob], filename, { type: 'application/pdf' }));
     }
+  }
+
+  // image already appended above if provided
+
+  if (options?.audioFile) {
+    // Send the recorded audio as both `stt_file` (backend param) and `audio`.
+    form.append('stt_file', options.audioFile);
+    form.append('audio', options.audioFile);
+    // Signal to the server that the audio language is English for transcription.
+    form.append('audio_language', 'en');
   }
 
   console.log(form)

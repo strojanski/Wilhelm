@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ScanLine, RotateCcw, ZoomIn, ZoomOut,
   Eye, EyeOff, Pencil, Trash2, X, Save, CheckCircle,
-  Loader2, AlertTriangle, FileText, Edit3, Download, Sparkles,
+  Loader2, AlertTriangle, FileText, Edit3, Download, Sparkles, Mic, Square,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { getPatient } from '../api/patients';
 import { getVisit, analyzeXray, saveAnnotations, getFileUrl, uploadReport } from '../api/visits';
@@ -99,6 +100,15 @@ export default function XrayDetailPage() {
   // ── report state ───────────────────────────────────────────────────────────
   const [reportMd, setReportMd] = useState('');
   const [doctorNotes, setDoctorNotes] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingMs, setRecordingMs] = useState(0);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioMime, setAudioMime] = useState('audio/webm');
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioError, setAudioError] = useState('');
+  const [doctorNotesCollapsed, setDoctorNotesCollapsed] = useState(false);
+  const [voiceNoteCollapsed, setVoiceNoteCollapsed] = useState(false);
   const [reportTab, setReportTab] = useState<'preview' | 'edit'>('preview');
   const [showPdf, setShowPdf] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
@@ -106,6 +116,11 @@ export default function XrayDetailPage() {
   const existingReport = visit?.reportFiles?.includes(reportPdfName) ? reportPdfName : null;
   const reportPdfUrl = existingReport ? getFileUrl(ehrId!, Number(visitId), 'report', existingReport) : null;
   const mdPreviewRef = useRef<HTMLDivElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!showPdf || !reportPdfUrl) return;
@@ -118,6 +133,144 @@ export default function XrayDetailPage() {
   useEffect(() => {
     return () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); };
   }, [pdfBlobUrl]);
+
+  const formatClock = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const formatMs = (ms: number) => formatClock(Math.round(ms / 1000));
+
+  const voiceStatus = isRecording
+    ? 'Recording...'
+    : audioUrl
+      ? 'Voice note ready'
+      : 'Mic idle';
+
+  const voiceTime = isRecording
+    ? formatMs(recordingMs)
+    : audioDuration !== null
+      ? formatClock(Math.round(audioDuration))
+      : audioBlob
+        ? formatMs(recordingMs)
+        : '00:00';
+
+  const reportGenerated = reportMd.trim().length > 0;
+
+  const stopRecording = () => {
+    if (recordingTimerRef.current) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    recordingStartRef.current = null;
+
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop();
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+
+    setIsRecording(false);
+  };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    setAudioError('');
+    setAudioDuration(null);
+    if (audioUrl || audioBlob) {
+      clearRecording();
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setAudioError('Microphone access is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const preferredTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+      ];
+      const mimeType = preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+
+      const resolvedMime = mimeType || recorder.mimeType || 'audio/webm';
+      setAudioMime(resolvedMime);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        if (chunksRef.current.length === 0) {
+          setAudioError('No audio captured. Please try again.');
+          setAudioBlob(null);
+          setAudioUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return null;
+          });
+          return;
+        }
+
+        const blob = new Blob(chunksRef.current, { type: resolvedMime });
+        setAudioBlob(blob);
+        setAudioUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      recordingStartRef.current = Date.now();
+      setRecordingMs(0);
+      recordingTimerRef.current = window.setInterval(() => {
+        if (recordingStartRef.current) {
+          setRecordingMs(Date.now() - recordingStartRef.current);
+        }
+      }, 200);
+    } catch (err) {
+      setAudioError('Microphone permission was denied or unavailable.');
+      stopRecording();
+    }
+  };
+
+  const clearRecording = () => {
+    setAudioBlob(null);
+    setAudioDuration(null);
+    setRecordingMs(0);
+    setAudioUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+      if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+        recorderRef.current.ondataavailable = null;
+        recorderRef.current.onstop = null;
+        recorderRef.current.stop();
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
 
   // ── canvas refs ────────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -166,12 +319,56 @@ export default function XrayDetailPage() {
     ? `fracture_probability_${Math.round((analysis.segments[0]?.iouScore ?? 0) * 100)}pct_confidence`
     : 'radiology';
 
+  const buildAudioFile = () => {
+    if (!audioBlob) return null;
+    const lower = audioMime.toLowerCase();
+    const ext = lower.includes('ogg')
+      ? 'ogg'
+      : lower.includes('wav')
+        ? 'wav'
+        : lower.includes('mp4')
+          ? 'm4a'
+          : 'webm';
+    return new File([audioBlob], `doctor-note.${ext}`, { type: audioMime || 'audio/webm' });
+  };
+
+  const fetchXrayFile = async () => {
+    const resp = await fetch(imgUrl);
+    if (!resp.ok) {
+      throw new Error('Unable to load the X-ray image for the report.');
+    }
+    const blob = await resp.blob();
+    const mime = blob.type || 'image/png';
+    const name = decodedFilename || 'xray.png';
+    return new File([blob], name, { type: mime });
+  };
+
   const reportMut = useMutation({
-    mutationFn: () => {
-      return analyzeWithLLM(doctorNotes || 'Produce a structured medical radiology report in Markdown.', patient!, category, triagePdfUrl);
+    mutationFn: async () => {
+      const imageFile = await fetchXrayFile();
+      const audioFile = buildAudioFile();
+      return analyzeWithLLM(
+        doctorNotes || 'Produce a structured medical radiology report in Markdown.',
+        patient!,
+        category,
+        triagePdfUrl,
+        { imageFile, audioFile },
+      );
     },
-    onSuccess: (md) => { setReportMd(md); setReportTab('preview'); },
+    onSuccess: (md) => {
+      setReportMd(md);
+      setReportTab('preview');
+      setDoctorNotesCollapsed(true);
+      setVoiceNoteCollapsed(true);
+    },
   });
+
+  useEffect(() => {
+    if (!reportGenerated) {
+      setDoctorNotesCollapsed(false);
+      setVoiceNoteCollapsed(false);
+    }
+  }, [reportGenerated]);
 
   const saveReportMut = useMutation({
     mutationFn: async () => {
@@ -270,7 +467,7 @@ export default function XrayDetailPage() {
           const alpha = isSelected ? 180 : 120;
           for (let i = 0; i < pixels.data.length; i += 4) {
             const brightness = pixels.data[i];
-            pixels.data[i]     = r;
+            pixels.data[i] = r;
             pixels.data[i + 1] = g;
             pixels.data[i + 2] = b;
             pixels.data[i + 3] = brightness > 128 ? alpha : 0;
@@ -317,7 +514,7 @@ export default function XrayDetailPage() {
     const offY = (displayH - nh * scale) / 2;
     return {
       x: ((e.clientX - r.left) - offX) / scale,
-      y: ((e.clientY - r.top)  - offY) / scale,
+      y: ((e.clientY - r.top) - offY) / scale,
     };
   };
 
@@ -381,11 +578,10 @@ export default function XrayDetailPage() {
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`group flex h-10 w-10 items-center justify-center rounded-md border backdrop-blur transition-all duration-150 disabled:opacity-40 ${
-        active
-          ? 'border-blue-500/70 bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/60'
-          : 'border-slate-700/80 bg-slate-900/70 text-slate-300 hover:border-blue-500/50 hover:text-blue-300'
-      }`}
+      className={`group flex h-10 w-10 items-center justify-center rounded-md border backdrop-blur transition-all duration-150 disabled:opacity-40 ${active
+        ? 'border-blue-500/70 bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/60'
+        : 'border-slate-700/80 bg-slate-900/70 text-slate-300 hover:border-blue-500/50 hover:text-blue-300'
+        }`}
     >
       {children}
     </button>
@@ -468,18 +664,20 @@ export default function XrayDetailPage() {
 
           {/* Markdown body — serif, izvid-style plain headings */}
           <div style={{ fontSize: '11.5px', lineHeight: 1.6, color: '#000' }}
-            dangerouslySetInnerHTML={{ __html: (() => {
-              let html = reportMd
-                .replace(/^# (.+)$/gm, '<h1 style="font-size:13px;font-weight:400;color:#000;margin:18px 0 4px;font-family:\'Times New Roman\',Georgia,serif">$1</h1>')
-                .replace(/^## (.+)$/gm, '<h2 style="font-size:12px;font-weight:400;color:#000;margin:16px 0 3px;font-family:\'Times New Roman\',Georgia,serif">$1</h2>')
-                .replace(/^### (.+)$/gm, '<h3 style="font-size:11px;font-weight:400;color:#000;margin:12px 0 2px;font-family:\'Times New Roman\',Georgia,serif;font-style:italic">$1</h3>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#000;font-weight:700">$1</strong>')
-                .replace(/^---+$/gm, '<hr style="border:none;border-top:0.5px solid #000;margin:16px 0" />')
-                .replace(/^- (.+)$/gm, '<li style="margin:1px 0">$1</li>')
-                .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul style="margin:4px 0;padding-left:22px;list-style:disc">${m}</ul>`)
-                .replace(/^(?!<[hul]|<hr|<strong)(.+)$/gm, '<p style="margin:4px 0">$1</p>');
-              return html;
-            })() }}
+            dangerouslySetInnerHTML={{
+              __html: (() => {
+                let html = reportMd
+                  .replace(/^# (.+)$/gm, '<h1 style="font-size:13px;font-weight:400;color:#000;margin:18px 0 4px;font-family:\'Times New Roman\',Georgia,serif">$1</h1>')
+                  .replace(/^## (.+)$/gm, '<h2 style="font-size:12px;font-weight:400;color:#000;margin:16px 0 3px;font-family:\'Times New Roman\',Georgia,serif">$1</h2>')
+                  .replace(/^### (.+)$/gm, '<h3 style="font-size:11px;font-weight:400;color:#000;margin:12px 0 2px;font-family:\'Times New Roman\',Georgia,serif;font-style:italic">$1</h3>')
+                  .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#000;font-weight:700">$1</strong>')
+                  .replace(/^---+$/gm, '<hr style="border:none;border-top:0.5px solid #000;margin:16px 0" />')
+                  .replace(/^- (.+)$/gm, '<li style="margin:1px 0">$1</li>')
+                  .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (m) => `<ul style="margin:4px 0;padding-left:22px;list-style:disc">${m}</ul>`)
+                  .replace(/^(?!<[hul]|<hr|<strong)(.+)$/gm, '<p style="margin:4px 0">$1</p>');
+                return html;
+              })()
+            }}
           />
 
           {/* Small italic ancillary print */}
@@ -501,8 +699,8 @@ export default function XrayDetailPage() {
           {/* Footer */}
           <div style={{ borderTop: '0.5px solid #000', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: '9px', color: '#000', fontFamily: 'Arial, Helvetica, sans-serif' }}>
             <div style={{ lineHeight: 1.4 }}>
-              Signed by: Hospital<br/>
-              information system<br/>
+              Signed by: Hospital<br />
+              information system<br />
               Wilhelm Medical Center
             </div>
             <div>Page: 1 of 1</div>
@@ -552,7 +750,7 @@ export default function XrayDetailPage() {
 
               {/* Magnifier lens */}
               {magnifier && mode === 'view' && imgNaturalSize && (() => {
-                const containerW = (canvasRef.current?.offsetWidth ?? imgNaturalSize.w) ;
+                const containerW = (canvasRef.current?.offsetWidth ?? imgNaturalSize.w);
                 const containerH = (canvasRef.current?.offsetHeight ?? imgNaturalSize.h);
                 const bgW = containerW * MAGNIFIER_ZOOM;
                 const bgH = containerH * MAGNIFIER_ZOOM;
@@ -681,16 +879,14 @@ export default function XrayDetailPage() {
                     <button
                       key={idx}
                       onClick={() => setSelectedSeg(isSel ? null : idx)}
-                      className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs backdrop-blur transition-all duration-150 ${
-                        isSel
-                          ? 'border-blue-500 bg-blue-500/20 text-blue-200 ring-2 ring-blue-500/60 ring-offset-2 ring-offset-[#0A0F1E]'
-                          : 'border-slate-700 bg-slate-900/80 text-slate-200 hover:border-slate-500'
-                      }`}
+                      className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs backdrop-blur transition-all duration-150 ${isSel
+                        ? 'border-blue-500 bg-blue-500/20 text-blue-200 ring-2 ring-blue-500/60 ring-offset-2 ring-offset-[#0A0F1E]'
+                        : 'border-slate-700 bg-slate-900/80 text-slate-200 hover:border-slate-500'
+                        }`}
                     >
                       <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          seg.userCorrected ? 'bg-amber-400' : 'bg-rose-500'
-                        }`}
+                        className={`h-1.5 w-1.5 rounded-full ${seg.userCorrected ? 'bg-amber-400' : 'bg-rose-500'
+                          }`}
                         style={seg.userCorrected ? undefined : { boxShadow: '0 0 6px rgba(244,63,94,0.8)' }}
                       />
                       <span className="font-medium">Region {idx + 1}</span>
@@ -794,13 +990,12 @@ export default function XrayDetailPage() {
                         {patient.age}
                       </span>
                       <span
-                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${
-                          patient.gender === 'MALE'
-                            ? 'border-blue-200 bg-blue-50 text-blue-700'
-                            : patient.gender === 'FEMALE'
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${patient.gender === 'MALE'
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : patient.gender === 'FEMALE'
                             ? 'border-violet-200 bg-violet-50 text-violet-700'
                             : 'border-slate-200 bg-slate-50 text-slate-700'
-                        }`}
+                          }`}
                       >
                         {patient.gender}
                       </span>
@@ -811,11 +1006,10 @@ export default function XrayDetailPage() {
                       )}
                       {analysis && (
                         <span
-                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
-                            analysis.segments.length > 0
-                              ? 'border-rose-200 bg-rose-50 text-rose-700'
-                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          }`}
+                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${analysis.segments.length > 0
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            }`}
                         >
                           {analysis.segments.length > 0
                             ? `${analysis.segments.length} fracture${analysis.segments.length !== 1 ? 's' : ''} detected`
@@ -829,23 +1023,165 @@ export default function XrayDetailPage() {
 
               {/* Doctor notes */}
               <div className="border-b border-slate-200 bg-white px-5 py-4">
-                <div className="mb-1.5 flex items-center justify-between">
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                   <label className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                     Doctor Notes
                   </label>
-                  {doctorNotes && (
+                  <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-slate-400">
                       {doctorNotes.length} chars
                     </span>
-                  )}
+                    {reportGenerated && (
+                      <button
+                        onClick={() => setDoctorNotesCollapsed((prev) => !prev)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500 hover:border-slate-300"
+                      >
+                        {doctorNotesCollapsed ? (
+                          <>
+                            <ChevronDown className="h-3 w-3" /> Show
+                          </>
+                        ) : (
+                          <>
+                            <ChevronUp className="h-3 w-3" /> Hide
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <textarea
-                  value={doctorNotes}
-                  onChange={(e) => setDoctorNotes(e.target.value)}
-                  placeholder="Clinical observations, symptoms, referring information…"
-                  className="w-full resize-none border-0 bg-transparent p-0 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
-                  rows={3}
-                />
+                {(!reportGenerated || !doctorNotesCollapsed) && (
+                  <textarea
+                    value={doctorNotes}
+                    onChange={(e) => setDoctorNotes(e.target.value)}
+                    placeholder="Clinical observations, symptoms, referring information…"
+                    className="w-full resize-none border-0 bg-transparent p-0 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                    rows={3}
+                  />
+                )}
+
+                {reportGenerated && voiceNoteCollapsed ? (
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`flex h-9 w-9 items-center justify-center rounded-full border ${isRecording
+                          ? 'border-rose-200 bg-rose-50 text-rose-600'
+                          : audioUrl
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
+                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                          }`}
+                      >
+                        <Mic className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                          Voice note
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">
+                          {voiceStatus} · <span className="font-mono">{voiceTime}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isRecording && (
+                        <button
+                          onClick={stopRecording}
+                          className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500"
+                        >
+                          <Square className="h-3.5 w-3.5" />
+                          Stop
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setVoiceNoteCollapsed(false)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        Show
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-[linear-gradient(135deg,_#fff7ed_0%,_#f8fafc_45%,_#fef2f2_100%)] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                          Voice note
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Record a note for Wilhelm to transcribe and include in the report.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={isRecording ? stopRecording : startRecording}
+                          disabled={reportMut.isPending}
+                          className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-semibold shadow-sm transition ${isRecording
+                            ? 'bg-rose-600 text-white hover:bg-rose-500'
+                            : 'bg-slate-900 text-white hover:bg-slate-800'
+                            } ${reportMut.isPending ? 'opacity-60' : ''}`}
+                        >
+                          {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                          {isRecording ? 'Stop' : audioUrl ? 'Record again' : 'Record'}
+                        </button>
+                        {audioUrl && !isRecording && (
+                          <button
+                            onClick={clearRecording}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Clear
+                          </button>
+                        )}
+                        {reportGenerated && (
+                          <button
+                            onClick={() => setVoiceNoteCollapsed(true)}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                            Hide
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-3">
+                      <div
+                        className={`flex h-9 w-9 items-center justify-center rounded-full border ${isRecording
+                          ? 'border-rose-200 bg-rose-50 text-rose-600'
+                          : audioUrl
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
+                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                          }`}
+                      >
+                        <Mic className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>{voiceStatus}</span>
+                          <span className="font-mono">{voiceTime}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {audioUrl && !isRecording && (
+                      <div className="mt-3 rounded-md border border-slate-200 bg-white p-2">
+                        <audio
+                          controls
+                          src={audioUrl}
+                          className="w-full"
+                          onLoadedMetadata={(e) => setAudioDuration(e.currentTarget.duration)}
+                        />
+                      </div>
+                    )}
+
+                    {audioError && (
+                      <div className="mt-3 flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                        {audioError}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Report body — scrollable */}
@@ -891,7 +1227,7 @@ export default function XrayDetailPage() {
                     </p>
                     <button
                       onClick={() => reportMut.mutate()}
-                      disabled={reportMut.isPending || !patient}
+                      disabled={reportMut.isPending || isRecording || !patient}
                       className="mt-6 inline-flex items-center gap-2 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 transition hover:from-blue-500 hover:to-blue-400 disabled:opacity-60"
                     >
                       <Sparkles className="h-4 w-4" /> Generate Report
@@ -995,7 +1331,7 @@ export default function XrayDetailPage() {
                   {reportMd && !reportMut.isPending && (
                     <button
                       onClick={() => reportMut.mutate()}
-                      disabled={reportMut.isPending}
+                      disabled={reportMut.isPending || isRecording}
                       className="inline-flex items-center gap-1.5 rounded-md bg-gradient-to-r from-blue-600 to-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-500/40 hover:from-blue-500 hover:to-blue-400"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
