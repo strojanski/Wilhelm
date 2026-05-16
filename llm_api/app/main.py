@@ -1,9 +1,9 @@
 """FastAPI entrypoint.
 
 Endpoints:
-  GET  /health
-  POST /analyze      multipart form: text, optional image, optional pdf, other fields
-  POST /transcribe   multipart form: audio file, optional language
+    GET  /health
+    POST /analyze      multipart form: text, optional image, optional pdf, optional audio, other fields
+    POST /transcribe   multipart form: audio file, optional language
 """
 
 from __future__ import annotations
@@ -21,7 +21,11 @@ from app.config import Settings, get_settings
 from app.schemas import HealthResponse, TranscribeResponse
 from app.services.llm_service import LLMService, TestLLMService
 from app.services.stt_service import STTService
-from app.utils.file_processing import encode_image_to_data_url, extract_pdf_text
+from app.utils.file_processing import (
+    encode_image_to_data_url,
+    encode_file_to_data_url,
+    extract_pdf_text,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,9 +113,17 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
 async def analyze(
     settings: Annotated[Settings, Depends(get_settings)],
     llm: Annotated[LLMService, Depends(get_llm_service)],
-    text: Annotated[str, Form(description="Primary user text / prompt.")],
+    stt: Annotated[STTService, Depends(get_stt_service)],
+    text: Annotated[str | None, Form(description="Primary user text / prompt.")] = None,
     image: Annotated[UploadFile | str | None, File(description="Optional image.")] = None,
     pdf: Annotated[UploadFile | str | None, File(description="Optional PDF document.")] = None,
+    # `stt_file` may be supplied by the client as an uploaded audio file (alias for `audio`).
+    stt_file: Annotated[UploadFile | None, File(description="Optional recorded audio (alias for audio).")] = None,
+    audio: Annotated[UploadFile | None, File(description="Optional audio (voice).")] = None,
+    audio_language: Annotated[
+        str | None,
+        Form(description="Optional ISO-639-1 language hint for audio transcription."),
+    ] = None,
     category: Annotated[str | None, Form(description="Optional category hint.")] = None,
     user_id: Annotated[str | None, Form(description="Optional user id.")] = None,
     metadata_json: Annotated[
@@ -157,6 +169,31 @@ async def analyze(
         # Allow passing PDF text directly as a string (for testing or non-file inputs)
         pdf_text = pdf.strip()
 
+    # ---- Audio (voice) ----
+    audio_data_url: str | None = None
+    audio_provided = isinstance(audio, UploadFile) and audio.filename
+    stt_provided = isinstance(stt_file, UploadFile) and stt_file.filename
+    if not audio_provided and stt_provided:
+        # Treat `stt_file` upload as the audio input when `audio` is not provided.
+        audio = stt_file
+        audio_provided = True
+
+    audio_meta: dict | None = None
+    if audio_provided:
+        audio_bytes = await _read_with_limit(audio, max_bytes, "audio")
+        try:
+            audio_data_url = encode_file_to_data_url(
+                audio_bytes, audio.content_type or "audio/webm"
+            )
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        # Keep lightweight metadata for later inclusion in `extra`.
+        audio_meta = {
+            "filename": audio.filename or "audio",
+            "content_type": audio.content_type or "audio/webm",
+            "size_bytes": len(audio_bytes),
+        }
+
     # ---- Extra fields ----
     extra: dict = {}
     if category:
@@ -171,13 +208,28 @@ async def analyze(
                 status.HTTP_400_BAD_REQUEST,
                 f"metadata_json is not valid JSON: {e}",
             ) from e
+    if audio_meta:
+        extra["audio"] = audio_meta
+
+    # ---- Final text assembly ----
+    normalized_text = (text or "").strip()
+
+    if not normalized_text and not image_data_url and not pdf_text and not audio_data_url:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Provide at least one of text, audio, image, or pdf.",
+        )
+
+    # doctor notes normalized tex
+    normalized_text = f"Doctor notes:\n{normalized_text}"
 
     # ---- Call LLM ----
     try:
         result = await llm.analyze(
-            user_text=text,
+            user_text=normalized_text,
             pdf_text=pdf_text,
             image_data_url=image_data_url,
+            audio_data_url=audio_data_url,
             extra_fields=extra or None,
         )
     except Exception as e:

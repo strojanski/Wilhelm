@@ -9,12 +9,12 @@ class Settings(BaseSettings):
     # LLM (OpenAI-compatible) ------------------------------------------------
     llm_base_url: str = "http://localhost:8000/v1"
     llm_api_key: str = "EMPTY"
-    llm_model: str = "google/gemma-3-27b-it"
+    llm_model: str = "google/gemma-4-e4b-it"
 
     # Speech-to-Text (OpenAI-compatible) -------------------------------------
-    stt_base_url: str = "https://api.openai.com/v1"
+    stt_base_url: str = "http://localhost:8000/v1"
     stt_api_key: str = "EMPTY"
-    stt_model: str = "whisper-1"
+    stt_model: str = "google/gemma-4-e4b-it"
 
     # App -------------------------------------------------------------------
     app_host: str = "0.0.0.0"

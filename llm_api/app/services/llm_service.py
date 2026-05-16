@@ -95,18 +95,25 @@ class LLMService:
         user_text: str,
         pdf_text: str | None = None,
         image_data_url: str | None = None,
+        audio_data_url: str | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> str:
         """Send everything to the LLM and return the model's Markdown text."""
         user_content: list[dict[str, Any]] = []
 
+        # Build the textual prompt block first, but append image BEFORE text
+        # when sending multimodal content — Gemma best practice.
         prompt_body = self._build_user_text_block(user_text, pdf_text, extra_fields)
-        user_content.append({"type": "text", "text": prompt_body})
 
+        # Multimodal order: image, then audio, then text (Gemma best practice)
         if image_data_url:
-            user_content.append(
-                {"type": "image_url", "image_url": {"url": image_data_url}}
-            )
+            user_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+
+        if audio_data_url:
+            user_content.append({"type": "audio_url", "audio_url": {"url": audio_data_url}})
+
+        # Then the text block
+        user_content.append({"type": "text", "text": prompt_body})
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},

@@ -40,6 +40,13 @@ class TranscribeResponse(BaseModel):
     duration_seconds: float | None = None
     model: str
 
+class ClassifyResponse(BaseModel):
+    """Response from the image classification endpoint."""
+    
+    category: str
+    confidence: float
+    model: str
+
 
 class HealthResponse(BaseModel):
     status: str

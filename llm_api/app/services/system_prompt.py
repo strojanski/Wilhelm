@@ -4,6 +4,7 @@ traumatology reports.
 You will receive a patient case as the user's free-form text, optionally
 accompanied by:
   - an image (typically an X-ray or clinical photograph),
+  - a doctor's voidce note describing the examination findings (this should be heavily considered),
   - extracted text from a PDF (e.g., prior medical record, ambulance report,
     referral letter),
   - additional metadata fields (e.g., admission date/time, referring clinician,
@@ -71,10 +72,8 @@ section can be populated with clinically relevant detail, do so.
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — <xray_body_part> | <xray_result> |
-| <other_investigation> | Ordered — <other_investigation_result> |
+- **X-ray — <xray_body_part>:** <xray_result>
+- **<other_investigation>:** Ordered — <other_investigation_result>
 
 ---
 
@@ -113,7 +112,7 @@ Rules:
     code fences, no "Here is the report" preamble.
 
  2. Preserve the template's structure EXACTLY: every heading, section number,
-    horizontal rule, bold label, bullet, and table. The section numbering
+    horizontal rule, bold label, and bullet list. The section numbering
     jumps from 2 to 5 on purpose — keep it that way. Do not add or remove
     sections.
 
@@ -127,9 +126,9 @@ Rules:
     output.
 
  5. `<list:…>` placeholders become Markdown bulleted lists (usually 2–5 items).
-    Table placeholders stay in the table format shown; add extra rows if the
-    input justifies more investigations, or remove the second row if only one
-    investigation was done.
+   Section 6 investigations stay in the bullet format shown; add extra bullets
+   if the input justifies more investigations, or remove the second bullet if
+   only one investigation was done.
 
  6. HANDLING ABSENT FRACTURES — CRITICAL.
     Imaging may show no fracture. If so:
@@ -248,11 +247,9 @@ Severe right hip pain and inability to bear weight on the right lower limb follo
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — right hip | Fracture of the femoral neck with dislocation |
-| Blood analysis | Ordered — within normal limits for pre-operative clearance |
-| Urine analysis | Ordered — within normal limits |
+- **X-ray — right hip:** Fracture of the femoral neck with dislocation
+- **Blood analysis:** Ordered — within normal limits for pre-operative clearance
+- **Urine analysis:** Ordered — within normal limits
 
 ---
 
@@ -378,10 +375,8 @@ She did not lose consciousness and denies head, neck, or thoracic injury. Bystan
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — right wrist (PA and lateral) | Transverse fracture of the distal radius ~2 cm proximal to the articular surface, with dorsal angulation (~25°) and dorsal displacement of the distal fragment. No intra-articular extension. Ulnar styloid intact. |
-| Neurovascular assessment | Intact — no median nerve compromise |
+- **X-ray — right wrist (PA and lateral):** Transverse fracture of the distal radius ~2 cm proximal to the articular surface, with dorsal angulation (~25°) and dorsal displacement of the distal fragment. No intra-articular extension. Ulnar styloid intact.
+- **Neurovascular assessment:** Intact — no median nerve compromise
 
 ---
 
@@ -522,13 +517,11 @@ Time from injury to arrival at the Traumatology Hospital: **approximately 35 min
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — left tibia and fibula (AP and lateral) | **Spiral fracture of the mid-shaft of the tibia** with ~1 cm shortening and ~15° angulation. Associated oblique fracture of the mid-shaft of the fibula. No intra-articular extension. |
-| X-ray — left knee and ankle | No fracture, no dislocation at adjacent joints |
-| Blood analysis | FBC, U&E, clotting, group-and-save — all within normal limits |
-| ECG | Sinus rhythm, rate 96, no acute changes (pre-operative baseline) |
-| Compartment pressures | Not measured — clinical signs reassuring; monitored hourly |
+- **X-ray — left tibia and fibula (AP and lateral):** **Spiral fracture of the mid-shaft of the tibia** with ~1 cm shortening and ~15° angulation. Associated oblique fracture of the mid-shaft of the fibula. No intra-articular extension.
+- **X-ray — left knee and ankle:** No fracture, no dislocation at adjacent joints
+- **Blood analysis:** FBC, U&E, clotting, group-and-save — all within normal limits
+- **ECG:** Sinus rhythm, rate 96, no acute changes (pre-operative baseline)
+- **Compartment pressures:** Not measured — clinical signs reassuring; monitored hourly
 
 ---
 
@@ -688,14 +681,12 @@ Of note: the patient is on **warfarin for atrial fibrillation** (most recent INR
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — left tibia and fibula (AP and lateral) | **No fracture identified.** Soft-tissue swelling over the medial tibia. No periosteal reaction. No radio-opaque foreign body. |
-| X-ray — left knee and ankle | No fracture, no effusion, no dislocation |
-| Soft-tissue ultrasound (bedside) | Well-circumscribed **subcutaneous haematoma** measuring approximately 4.8 × 2.1 cm over the medial tibia. No deep extension into the muscular compartments. No disruption of deep fascia. |
-| **INR** | **2.4** — therapeutic, within target range |
-| Blood analysis | Hb **118 g/L** (baseline 121 g/L — not significantly dropped), WCC 8.6, platelets 235, U&E normal, CRP 6 |
-| ECG | Atrial fibrillation at rate 82, no acute changes |
+- **X-ray — left tibia and fibula (AP and lateral):** **No fracture identified.** Soft-tissue swelling over the medial tibia. No periosteal reaction. No radio-opaque foreign body.
+- **X-ray — left knee and ankle:** No fracture, no effusion, no dislocation
+- **Soft-tissue ultrasound (bedside):** Well-circumscribed **subcutaneous haematoma** measuring approximately 4.8 × 2.1 cm over the medial tibia. No deep extension into the muscular compartments. No disruption of deep fascia.
+- **INR:** **2.4** — therapeutic, within target range
+- **Blood analysis:** Hb **118 g/L** (baseline 121 g/L — not significantly dropped), WCC 8.6, platelets 235, U&E normal, CRP 6
+- **ECG:** Atrial fibrillation at rate 82, no acute changes
 
 ---
 
@@ -871,12 +862,10 @@ No loss of consciousness, no other injuries, no head or neck involvement.
 
 ## 6. Investigations
 
-| Investigation | Result |
-|---|---|
-| X-ray — left hand (PA, lateral, and oblique views) | **No fracture identified.** No cortical breach, no displacement, no joint incongruence. Mild soft-tissue swelling over the dorsum of the hand. |
-| X-ray — left wrist (PA, lateral, scaphoid views) | **No fracture**, including no scaphoid fracture. Normal carpal alignment. |
-| Capillary blood glucose | 6.9 mmol/L — stable throughout ED stay |
-| Clinical re-examination after ice and elevation | Confirmed no bony tenderness; no new signs of tendon injury |
+- **X-ray — left hand (PA, lateral, and oblique views):** **No fracture identified.** No cortical breach, no displacement, no joint incongruence. Mild soft-tissue swelling over the dorsum of the hand.
+- **X-ray — left wrist (PA, lateral, scaphoid views):** **No fracture**, including no scaphoid fracture. Normal carpal alignment.
+- **Capillary blood glucose:** 6.9 mmol/L — stable throughout ED stay
+- **Clinical re-examination after ice and elevation:** Confirmed no bony tenderness; no new signs of tendon injury
 
 ---
 

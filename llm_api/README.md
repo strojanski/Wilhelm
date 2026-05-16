@@ -1,6 +1,6 @@
 # Gemma Multimodal Analyzer API
 
-A FastAPI service that accepts **text + image + PDF + extra metadata**, sends
+A FastAPI service that accepts **text + image + PDF + audio + extra metadata**, sends
 everything to an **OpenAI-compatible LLM** (local vLLM serving Gemma, Google's
 Gemini/Gemma OpenAI-compat endpoint, OpenAI, etc.), and returns a **structured
 template response**. Also exposes a **speech-to-text** endpoint using the
@@ -127,11 +127,12 @@ curl -X POST http://localhost:8080/analyze \
   -F "category=finance" \
   -F 'metadata_json={"quarter":"Q3"}'
 
-# Text + image + PDF
+# Text + image + PDF + audio
 curl -X POST http://localhost:8080/analyze \
   -F "text=Summarize the attached materials." \
   -F "image=@photo.jpg" \
-  -F "pdf=@report.pdf"
+  -F "pdf=@report.pdf" \
+  -F "audio=@recording.mp3"
 
 # Speech to text
 curl -X POST http://localhost:8080/transcribe \
@@ -172,7 +173,7 @@ To change the template, edit `SYSTEM_PROMPT` and `AnalyzeResponse` in
 | Method | Path          | Purpose                                              |
 |--------|---------------|------------------------------------------------------|
 | GET    | `/health`     | Returns status and configured model names            |
-| POST   | `/analyze`    | Multipart: `text` + optional `image`/`pdf`/extras    |
+| POST   | `/analyze`    | Multipart: `text` + optional `image`/`pdf`/`audio`/extras |
 | POST   | `/transcribe` | Multipart: `audio` + optional `language`             |
 | GET    | `/docs`       | Swagger UI                                           |
 | GET    | `/redoc`      | ReDoc UI                                             |

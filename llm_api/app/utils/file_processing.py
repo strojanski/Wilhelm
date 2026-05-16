@@ -87,3 +87,14 @@ def encode_image_to_data_url(
 
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:image/{img_format};base64,{b64}"
+
+
+def encode_file_to_data_url(file_bytes: bytes, content_type: str) -> str:
+    """Encode arbitrary file bytes (audio, etc.) into a data URL.
+
+    Does no transformation; caller should ensure size limits are respected.
+    """
+    if not content_type:
+        raise ValueError("Content type required to encode file to data URL")
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
+    return f"data:{content_type};base64,{b64}"

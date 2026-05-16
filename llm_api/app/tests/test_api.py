@@ -5,6 +5,7 @@ Usage:
     python tests/test_api.py --url http://host:8080   # custom host
     python tests/test_api.py --skip-transcribe        # skip STT test
     python tests/test_api.py --image path/to/img.png --pdf path/to/doc.pdf
+    python tests/test_api.py --audio path/to/clip.wav
 
 This does NOT mock anything - it actually hits the API, which in turn hits
 your configured LLM backend (vLLM, Gemini, etc.). Make sure the API is
@@ -51,15 +52,23 @@ def test_analyze_text_only(client: httpx.Client) -> None:
         timeout=120,
     )
     print(f"status={r.status_code}")
-    print(json.dumps(r.json(), indent=2))
+    try:
+        print(json.dumps(r.json(), indent=2))
+    except Exception:
+        print(r.text)
     r.raise_for_status()
 
 
 def test_analyze_with_files(
-    client: httpx.Client, image_path: Path | None, pdf_path: Path | None
+    client: httpx.Client,
+    image_path: Path | None,
+    pdf_path: Path | None,
+    audio_path: Path | None,
 ) -> None:
-    if not image_path and not pdf_path:
-        print("\n(skipping file-upload test: pass --image and/or --pdf to enable)")
+    if not image_path and not pdf_path and not audio_path:
+        print(
+            "\n(skipping file-upload test: pass --image, --pdf, and/or --audio to enable)"
+        )
         return
 
     _print_header("POST /analyze  (with attachments)")
@@ -70,6 +79,17 @@ def test_analyze_with_files(
         )
     if pdf_path:
         files.append(("pdf", (pdf_path.name, pdf_path.read_bytes(), "application/pdf")))
+    if audio_path:
+        files.append(
+            (
+                "audio",
+                (
+                    audio_path.name,
+                    audio_path.read_bytes(),
+                    _guess_audio_mime(audio_path),
+                ),
+            )
+        )
 
     r = client.post(
         "/analyze",
@@ -128,6 +148,18 @@ def _guess_image_mime(p: Path) -> str:
     }.get(ext, "application/octet-stream")
 
 
+def _guess_audio_mime(p: Path) -> str:
+    ext = p.suffix.lower()
+    return {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".weba": "audio/webm",
+    }.get(ext, "application/octet-stream")
+
+
 def _silent_wav_1sec() -> bytes:
     """Minimal 1-second silent PCM WAV, 16kHz mono 16-bit."""
     import struct
@@ -156,7 +188,7 @@ def main() -> int:
         test_health(client)
         if not args.skip_analyze:
             test_analyze_text_only(client)
-            test_analyze_with_files(client, args.image, args.pdf)
+            test_analyze_with_files(client, args.image, args.pdf, args.audio)
         if not args.skip_transcribe:
             test_transcribe(client, args.audio)
 
