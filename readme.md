@@ -32,7 +32,7 @@ An X-ray moves through four stages:
   X-ray upload
         │
         ▼
-  1. CLASSIFY   ── MedSigLIP-448 embeddings + Logistic Regression
+  1. CLASSIFY   ── MedSigLIP-448 embeddings + MLP classifier head
         │           "Is there a fracture?"  (0.91 AUC, recall-tuned)
         ▼
   2. DETECT     ── YOLOv8 (fine-tuned on FracAtlas)
@@ -114,7 +114,7 @@ Frontend (React + Vite, :5173)
 
 | Stage | Model | Asset | Provenance |
 |---|---|---|---|
-| Classify | MedSigLIP-448 embeddings + Logistic Regression, **0.91 AUC**, threshold `0.0853` (tuned for ≥90% recall) | `vision_classifier/fracture_classifier_v3_0.91auc.pkl`, `embedding_cache.pkl` | Trained on **FracAtlas** (4,083 X-rays, CC-BY 4.0) |
+| Classify | MedSigLIP-448 embeddings + MLP classifier head, **0.91 AUC**, threshold `0.0853` (tuned for ≥90% recall) | `vision_classifier/fracture_classifier_v3_0.91auc.pkl`, `embedding_cache.pkl` | Trained on **FracAtlas** (4,083 X-rays, CC-BY 4.0) |
 | Detect | YOLOv8, fine-tuned for fracture regions | `vision_segmentation/weights/best.pt` | Trained on FracAtlas (COCO annotations) |
 | Segment | SAM-Med2D (ViT-B, medical Segment Anything, 256×256, adapter) | `vision_segmentation/SAM-Med2D/sam-med2d_b.pth` | Cloned from [OpenGVLab/SAM-Med2D](https://github.com/OpenGVLab/SAM-Med2D); checkpoint auto-pulled at build |
 | Reason | Gemma 4 (multimodal) | served by Ollama | `gemma/.env` (`LLM_MODEL`) |
