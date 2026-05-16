@@ -1,2 +1,13 @@
+.git/
+**/__pycache__/
+**/.pytest_cache/
+**/.ipynb_checkpoints/
 vision_segmentation/SAM-Med2D/
 vision_segmentation/weights/
+llm_api/.env
+vision_classifier/data/
+vision_classifier/medsiglip-448/
+vision_inference/output/
+bone_fracture_classifier_medsiglip.ipynb
+vision_classifier/fracture_classifier_v4.pkl
+vision_classifier/fracture_classifier_v4.json

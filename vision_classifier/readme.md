@@ -1,96 +1,89 @@
 # Fracture Classifier
 
-Binary fracture classifier for the RadiAI triage pipeline. Uses pre-computed **MedSigLIP-448** embeddings (1152-D) + a trained MLP head — no transformer needed at inference time.
+Binary fracture classifier tooling for the Wilhelm vision pipeline.
 
-Trained on FracAtlas (4,083 X-rays, ~17% fractured). Threshold calibrated to ≥90% recall.
+Production inference now runs the uploaded image pixels through MedSigLIP-448 in
+real time, then passes the embedding to a sklearn-compatible classifier head.
+The old `embedding_cache.pkl` shortcut is still available for debugging, but it
+is disabled by default.
 
----
+## Production Artifacts
 
-## Quick Start
+The Docker image expects these files inside the image:
 
-### 1. Environment
+| Path | Purpose |
+| --- | --- |
+| `vision_classifier/medsiglip-448/` | Local MedSigLIP model snapshot, downloaded during Docker build |
+| `vision_classifier/fracture_classifier_v3_0.91auc.pkl` | Default production classifier head |
+| `vision_classifier/fracture_classifier_v3_0.91auc.json` | Optional metadata with threshold and metrics |
+| `vision_segmentation/weights/best.pt` | YOLO fracture detector |
+| `vision_segmentation/SAM-Med2D/` | SAM-Med2D source and checkpoint |
 
+## Extract Embeddings Locally
+
+Run this outside Docker after downloading FracAtlas locally:
+
+```powershell
+$env:HF_TOKEN = "hf_..."
+python vision_classifier/scripts/embed.py `
+  --data-dir C:\Users\Erik\Documents\FracAtlas\FracAtlas `
+  --out vision_classifier/data/fracatlas_medsiglip_embeddings.npz
 ```
-cd vision_classifier
-.venv\Scripts\activate
-pip install -r requirements.txt
+
+`vision_classifier/data/` is ignored by Git.
+
+## Train A Classifier Head
+
+Logistic regression keeps the older simple path:
+
+```powershell
+python vision_classifier/scripts/train.py `
+  --embeddings vision_classifier/data/fracatlas_medsiglip_embeddings.npz `
+  --head logreg `
+  --out vision_classifier/fracture_classifier_v4.pkl `
+  --metadata-out vision_classifier/fracture_classifier_v4.json
 ```
 
-### 2. Build the embedding cache (once)
+The notebook MLP path is:
 
-Converts the pre-computed MedSigLIP embeddings into a fast lookup table.
-After this step MedSigLIP is never loaded at inference.
-
+```powershell
+python vision_classifier/scripts/train.py `
+  --embeddings vision_classifier/data/fracatlas_medsiglip_embeddings.npz `
+  --head mlp `
+  --target-recall 0.90 `
+  --out vision_classifier/fracture_classifier_v4.pkl `
+  --metadata-out vision_classifier/fracture_classifier_v4.json
 ```
-cd scripts
-python build_cache.py --data-dir ..\data\FracAtlas\FracAtlas
+
+For the first real MLP pass, run a small CV hyperparameter search on the
+training split before the final held-out test evaluation:
+
+```powershell
+python vision_classifier/scripts/train.py `
+  --embeddings vision_classifier/data/fracatlas_medsiglip_embeddings.npz `
+  --head mlp `
+  --search `
+  --search-iter 16 `
+  --search-cv 3 `
+  --search-scoring roc_auc `
+  --target-recall 0.90 `
+  --out vision_classifier/fracture_classifier_v4.pkl `
+  --metadata-out vision_classifier/fracture_classifier_v4.json `
+  --search-out vision_classifier/data/mlp_search_v4.csv
 ```
 
-### 3. Start the API
+After validating metrics, either set `CLF_PATH` and `CLF_METADATA_PATH`, or
+promote the new artifact by replacing the default `.pkl` and committing the
+approved classifier head and metadata.
 
-```
+## Standalone Classifier API
+
+This is optional; the main app uses `vision/vision_api.py`.
+
+```powershell
+cd vision_classifier/scripts
 uvicorn api:app --reload --port 8001
 ```
 
-Expected startup output:
-```
-Embedding cache: 4083 images (MedSigLIP not needed)
-Loading classifier from fracture_classifier_v3_0.91auc.pkl ...
-Ready.
-```
-
-### 4. Run inference on an image
-
-```
-python infer.py --image ..\data\FracAtlas\FracAtlas\images\Fractured\IMG0000019.jpg --image-id IMG0000019.jpg
-```
-
-`--image-id` matches the filename to a cached embedding (instant lookup).
-Without it the API falls back to running MedSigLIP (slow, requires the model files).
-
----
-
-## API
-
-**POST** `http://localhost:8001/classify`
-
-Request:
-```json
-{
-  "image_b64": "<base64-encoded image>",
-  "image_id":  "IMG0000019.jpg",
-  "true_label": "fractured"
-}
-```
-`image_id` and `true_label` are optional.
-
-Response:
-```json
-{
-  "prob_fractured":       0.848,
-  "send_to_segmentation": true,
-  "overlay_b64":          "<base64 JPEG>"
-}
-```
-
-- `prob_fractured` — raw probability 0–1
-- `send_to_segmentation` — `true` when `prob >= 0.0853` (≥90% recall threshold)
-- `overlay_b64` — the X-ray with red/green border and probability drawn on it
-
-**GET** `http://localhost:8001/health`
-
----
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `scripts/build_cache.py` | Build `embedding_cache.pkl` from npz + dataset.csv |
-| `scripts/api.py` | FastAPI service (port 8001) |
-| `scripts/infer.py` | Call the API on one image, show overlay |
-| `scripts/model.py` | Embedding cache loader + MLP inference |
-| `scripts/evaluate.py` | Reproduce test metrics from the notebook |
-| `scripts/train.py` | Retrain the MLP head from embeddings |
-| `fracture_classifier_v3_0.91auc.pkl` | Trained MLP classifier |
-| `data/fracatlas_medsiglip_embeddings.npz` | Pre-computed embeddings (4083 × 1152) |
-| `embedding_cache.pkl` | Built by `build_cache.py` — filename → embedding lookup |
+`USE_EMBEDDING_CACHE=true` enables the old filename-cache lookup for local
+debugging only.

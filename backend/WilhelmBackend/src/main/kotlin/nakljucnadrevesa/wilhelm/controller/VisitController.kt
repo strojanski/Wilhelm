@@ -62,8 +62,10 @@ class VisitController(private val visitService: VisitService) {
         visitService.uploadDocument(visitId, DocumentType.XRAY, file)
 
     @GetMapping("/{visitId}/xray/{filename}")
-    fun downloadXray(@PathVariable visitId: Long, @PathVariable filename: String): ResponseEntity<Resource> =
-        visitService.downloadDocument(visitId, DocumentType.XRAY, filename).asAttachment(filename, MediaType.IMAGE_PNG)
+    fun downloadXray(@PathVariable visitId: Long, @PathVariable filename: String): ResponseEntity<Resource> {
+        val mediaType = if (filename.lowercase().endsWith(".png")) MediaType.IMAGE_PNG else MediaType.IMAGE_JPEG
+        return visitService.downloadDocument(visitId, DocumentType.XRAY, filename).asInline(filename, mediaType)
+    }
 
     @PostMapping("/{visitId}/xray/{filename}/analyze")
     fun analyzeXray(

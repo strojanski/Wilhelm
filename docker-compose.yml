@@ -35,7 +35,13 @@ services:
       - reports:/opt/wilhelm-server/reports
 
   vision-api:
-    build: .
+    build:
+      context: .
+      args:
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+        DOWNLOAD_MEDSIGLIP: ${DOWNLOAD_MEDSIGLIP:-false}
+      secrets:
+        - hf_token
     working_dir: /app/vision
     command: uvicorn vision_api:app --host 0.0.0.0 --port 8000
     ports:
@@ -46,6 +52,13 @@ services:
       - ./vision_segmentation/weights:/app/vision_segmentation/weights:ro
     environment:
       MODEL_ROOT: /app
+      CLASSIFIER_MODE: ${CLASSIFIER_MODE:-embeddings}
+      CLF_PATH: ${CLF_PATH:-/app/vision_classifier/fracture_classifier_v3_0.91auc.pkl}
+      CLF_METADATA_PATH: ${CLF_METADATA_PATH:-/app/vision_classifier/fracture_classifier_v3_0.91auc.json}
+      FRACTURE_THRESHOLD: ${FRACTURE_THRESHOLD:-0.0853}
+      VISION_DEVICE: ${VISION_DEVICE:-cpu}
+      USE_EMBEDDING_CACHE: ${USE_EMBEDDING_CACHE:-false}
+      ALLOW_REMOTE_MEDSIGLIP: ${ALLOW_REMOTE_MEDSIGLIP:-false}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -54,7 +67,13 @@ services:
       start_period: 300s
 
   tee-extension:
-    build: .
+    build:
+      context: .
+      args:
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+        DOWNLOAD_MEDSIGLIP: ${DOWNLOAD_MEDSIGLIP:-false}
+      secrets:
+        - hf_token
     working_dir: /app/vision
     command: python main.py
     ports:
@@ -175,3 +194,7 @@ volumes:
   ollama_data:
   caddy_data:
   caddy_config:
+
+secrets:
+  hf_token:
+    environment: HF_TOKEN

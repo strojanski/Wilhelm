@@ -1,9 +1,9 @@
 """Quick test for the classifier API.
 
 Run from vision_classifier/scripts/:
-    python test_api.py path\to\image.jpg
-    python test_api.py path\to\image.jpg --show      # display overlay image
-    python test_api.py path\to\image.jpg --true-label fractured
+    python test_api.py path\\to\\image.jpg
+    python test_api.py path\\to\\image.jpg --show      # display overlay image
+    python test_api.py path\\to\\image.jpg --true-label fractured
 """
 
 import argparse
@@ -42,7 +42,7 @@ def show_overlay(overlay_b64: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("image", type=Path)
-    ap.add_argument("--image-id",   default=None, help="filename key for cached embedding, e.g. IMG0000019.jpg")
+    ap.add_argument("--image-id",   default=None, help="optional filename/id for logging or debug-cache mode")
     ap.add_argument("--show",       action="store_true", help="display overlay image")
     ap.add_argument("--true-label", choices=["fractured", "normal"], default=None)
     args = ap.parse_args()

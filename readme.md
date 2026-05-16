@@ -195,3 +195,43 @@ Wilhelm is built on open models and an openly licensed dataset.
 - **FracAtlas** — Abedeen, Rahman, et al., *FracAtlas: A Dataset for Fracture Classification, Localization and Segmentation of Musculoskeletal Radiographs*, *Scientific Data* 10, 521 (2023), [doi:10.1038/s41597-023-02432-4](https://doi.org/10.1038/s41597-023-02432-4). 4,083 manually annotated radiographs, CC-BY 4.0. Used via [`yh0701/FracAtlas_dataset`](https://huggingface.co/datasets/yh0701/FracAtlas_dataset) (Hugging Face) and the [`mahmudulhasantasin/fracatlas-original-dataset`](https://www.kaggle.com/datasets/mahmudulhasantasin/fracatlas-original-dataset) (Kaggle) mirror.
 
 Deeper component docs: `backend/WilhelmBackend/README.md`, `llm_api/README.md`, `vision/README.md`.
+
+## Fracture classifier modes
+
+The vision service supports two interchangeable fracture-classifier backends, selected
+with the `CLASSIFIER_MODE` environment variable.
+
+### `embeddings` (default)
+
+The default. Uses the precomputed embedding cache plus the sklearn classifier
+(`vision_classifier/fracture_classifier_v3_0.91auc.pkl`). Runs CPU-only, needs no
+Hugging Face token and no GPU. This is the setup used by `docker compose up` with no
+extra configuration — nothing to do.
+
+### `live` (optional, MedSigLIP)
+
+Real-time classification with the `google/medsiglip-448` MedSigLIP encoder. This is
+opt-in because it requires a Hugging Face access token (the MedSigLIP model is gated)
+and is intended to run on an NVIDIA GPU.
+
+Enable it by setting, in your environment / `.env`:
+
+```
+CLASSIFIER_MODE=live
+DOWNLOAD_MEDSIGLIP=true
+TORCH_INDEX=https://download.pytorch.org/whl/cu128
+VISION_DEVICE=cuda
+```
+
+and providing the token at build time:
+
+```
+HF_TOKEN=hf_xxx docker compose build vision-api tee-extension
+docker compose up
+```
+
+For a GPU machine you must also expose the GPU to the `vision-api` (and `tee-extension`) containers (e.g. a
+`docker-compose.override.yml` adding `gpus: all`). Without `DOWNLOAD_MEDSIGLIP=true`
+the MedSigLIP weights are not downloaded and the image stays CPU-sized; set
+`ALLOW_REMOTE_MEDSIGLIP=true` to let the service pull the model at runtime instead of
+at build time.

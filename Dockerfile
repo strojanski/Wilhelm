@@ -8,8 +8,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-only torch avoids pulling ~1.5GB of CUDA wheels.
-# Override with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 for GPU.
+# Override with --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 for GPU.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+
+# Optional MedSigLIP download for CLASSIFIER_MODE=live. Off by default so the
+# default build needs no Hugging Face token and stays CPU-sized.
+ARG DOWNLOAD_MEDSIGLIP=false
+ARG MEDSIGLIP_MODEL_ID=google/medsiglip-448
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=secret,id=hf_token,required=false <<'SH'
+set -e
+if [ "${DOWNLOAD_MEDSIGLIP}" != "true" ]; then
+  echo "DOWNLOAD_MEDSIGLIP=${DOWNLOAD_MEDSIGLIP}; skipping MedSigLIP download."
+  exit 0
+fi
+pip install huggingface_hub
+if [ ! -s /run/secrets/hf_token ]; then
+  echo "DOWNLOAD_MEDSIGLIP=true but the hf_token build secret is missing/empty." >&2
+  exit 1
+fi
+python - <<'INNER'
+import os
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+token = Path("/run/secrets/hf_token").read_text().strip()
+snapshot_download(
+    repo_id=os.environ["MEDSIGLIP_MODEL_ID"],
+    local_dir="/app/vision_classifier/medsiglip-448",
+    local_dir_use_symlinks=False,
+    token=token,
+)
+INNER
+SH
 
 COPY vision/requirements.txt requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \

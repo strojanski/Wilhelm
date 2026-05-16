@@ -1,0 +1,7 @@
+{
+  "feature_dim": 1152,
+  "head": "existing_default",
+  "model_id": "google/medsiglip-448",
+  "notes": "Default classifier artifact kept for production compatibility. Retrain with vision_classifier/scripts/train.py before replacing.",
+  "threshold": 0.0853
+}

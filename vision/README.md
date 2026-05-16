@@ -1,98 +1,75 @@
 # Vision Backend
 
-TEE extension server + FastAPI vision inference service for fracture detection.
+TEE extension server plus FastAPI vision inference service for fracture
+classification and segmentation.
 
-## Folder structure
+The production flow is:
 
-```
-vision/
-├── app/
-│   ├── __init__.py
-│   ├── config.py          # op types, commands, VISION_API_URL
-│   └── handlers.py        # VISION/ANALYZE and VISION/HEALTH handlers
-├── base/                  # TEE framework (server, types, encoding, crypto)
-│   ├── server.py
-│   ├── types.py
-│   ├── encoding.py
-│   └── crypto.py
-├── models/                # ← CREATE THIS — put checkpoint files here
-│   ├── vision_classifier/
-│   │   ├── embedding_cache.pkl
-│   │   └── fracture_classifier_v3_0.91auc.pkl
-│   └── vision_segmentation/
-│       ├── weights/
-│       │   └── best.pt
-│       └── SAM-Med2D/
-│           ├── sam-med2d_b.pth
-│           └── ... (SAM-Med2D source files)
-├── vision_api.py          # FastAPI inference service (port 8000)
-├── main.py                # TEE extension server (port 8080)
-└── requirements.txt
+1. Fetch the uploaded X-ray from the backend URL.
+2. Embed the actual pixels with local MedSigLIP-448.
+3. Score the embedding with the sklearn classifier head.
+4. Run YOLO plus SAM-Med2D only when `prob_fracture >= threshold`.
+5. Return the same Spring-compatible response shape: `prob_fracture`,
+   `predicted_fracture`, and `segments`.
+
+## Docker Build
+
+MedSigLIP is downloaded into the image at build time with a BuildKit secret.
+First accept the MedSigLIP terms on Hugging Face:
+
+https://huggingface.co/google/medsiglip-448
+
+Then build from the repository root:
+
+```powershell
+$env:HF_TOKEN = "hf_..."
+docker compose up --build vision-api
 ```
 
-## Checkpoint files to supply
+The token is used as a build secret and is not copied into the final image.
+The vision image installs CUDA PyTorch by default and Compose requests the
+NVIDIA GPU for `vision-api`. Set `VISION_DEVICE=cpu` and
+`TORCH_INDEX=https://download.pytorch.org/whl/cpu` only when you intentionally
+want a CPU-only build/run.
 
-| File | Description |
-|------|-------------|
-| `models/vision_classifier/embedding_cache.pkl` | Precomputed image embeddings |
-| `models/vision_classifier/fracture_classifier_v3_0.91auc.pkl` | Trained LR classifier |
-| `models/vision_segmentation/weights/best.pt` | YOLO detection weights |
-| `models/vision_segmentation/SAM-Med2D/sam-med2d_b.pth` | SAM-Med2D checkpoint |
-| `models/vision_segmentation/SAM-Med2D/` | SAM-Med2D source (clone from repo) |
+## Runtime Artifacts
 
-## Environment variables
+| Path | Description |
+| --- | --- |
+| `/app/vision_classifier/medsiglip-448/` | Baked MedSigLIP model snapshot |
+| `/app/vision_classifier/fracture_classifier_v3_0.91auc.pkl` | Default classifier head |
+| `/app/vision_classifier/fracture_classifier_v3_0.91auc.json` | Optional threshold/metrics metadata |
+| `/app/vision_segmentation/weights/best.pt` | YOLO detection weights |
+| `/app/vision_segmentation/SAM-Med2D/` | SAM-Med2D source and checkpoint |
+
+## Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `VISION_API_URL` | `http://localhost:8000` | Where the FastAPI service runs |
-| `MODEL_ROOT` | parent of `vision/` | Root for model file resolution |
-| `CACHE_PATH` | `$MODEL_ROOT/vision_classifier/embedding_cache.pkl` | Override cache path directly |
-| `CLF_PATH` | `$MODEL_ROOT/vision_classifier/fracture_classifier_v3_0.91auc.pkl` | Override classifier path |
-| `YOLO_WEIGHTS` | `$MODEL_ROOT/vision_segmentation/weights/best.pt` | Override YOLO weights path |
-| `SAM_CHECKPOINT` | `$MODEL_ROOT/vision_segmentation/SAM-Med2D/sam-med2d_b.pth` | Override SAM checkpoint path |
-| `SAM_SRC` | `$MODEL_ROOT/vision_segmentation/SAM-Med2D` | Override SAM source path |
-| `FRACTURE_THRESHOLD` | `0.0853` | Classification decision threshold |
-| `EXTENSION_PORT` | `8080` | TEE extension HTTP port |
-| `SIGN_PORT` | `9090` | TEE signing port |
-
-If you place checkpoints in `vision/models/`, set:
-
-```bash
-export MODEL_ROOT=/path/to/vision/models
-```
-
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-## Running
-
-Start both services — the FastAPI service must be up before the TEE extension handles requests.
-
-**Service 1 — Vision inference API (loads ML models)**
-```bash
-MODEL_ROOT=/path/to/vision/models uvicorn vision_api:app --port 8000
-```
-
-**Service 2 — TEE extension server**
-```bash
-python main.py
-```
+| --- | --- | --- |
+| `VISION_API_URL` | `http://localhost:8000` | Where the TEE extension calls the FastAPI service |
+| `MODEL_ROOT` | parent of `vision/` | Root for model path resolution |
+| `MEDSIGLIP_MODEL_DIR` | `$MODEL_ROOT/vision_classifier/medsiglip-448` | Local MedSigLIP model folder |
+| `CLF_PATH` | `$MODEL_ROOT/vision_classifier/fracture_classifier_v3_0.91auc.pkl` | Classifier head path |
+| `CLF_METADATA_PATH` | `CLF_PATH` with `.json` suffix | Optional threshold/metrics metadata |
+| `CACHE_PATH` | `$MODEL_ROOT/vision_classifier/embedding_cache.pkl` | Optional debug cache path |
+| `USE_EMBEDDING_CACHE` | `false` | Enables old filename embedding cache mode |
+| `VISION_DEVICE` | `cuda` in Docker | `cuda` or `cpu`; fails fast if CUDA is requested but unavailable |
+| `FRACTURE_THRESHOLD` | metadata threshold, else `0.0853` | Overrides classifier decision threshold |
+| `YOLO_WEIGHTS` | `$MODEL_ROOT/vision_segmentation/weights/best.pt` | YOLO weights path |
+| `SAM_CHECKPOINT` | `$MODEL_ROOT/vision_segmentation/SAM-Med2D/sam-med2d_b.pth` | SAM-Med2D checkpoint path |
+| `SAM_SRC` | `$MODEL_ROOT/vision_segmentation/SAM-Med2D` | SAM-Med2D source path |
 
 ## Endpoints
 
-### Via TEE extension (port 8080)
+Direct FastAPI service:
 
-**POST /action** — `VISION / ANALYZE`
-
-`originalMessage` must be a hex-encoded JSON string:
-```json
-{ "image_url": "https://example.com/xray.jpg" }
+```text
+GET  /health
+POST /analyze-url   body: { "image_url": "..." }
 ```
 
-Response `data` field is hex-encoded JSON:
+Analyze response:
+
 ```json
 {
   "segments": [
@@ -103,21 +80,10 @@ Response `data` field is hex-encoded JSON:
 }
 ```
 
-**POST /action** — `VISION / HEALTH`
+TEE extension:
 
-No payload needed. Returns hex-encoded JSON:
-```json
-{ "status": "ok", "device": "cuda", "threshold": 0.0853, "cached_embeddings": 1200 }
-```
-
-**GET /state**
-```json
-{ "stateVersion": "...", "state": { "version": "0.1.0", "vision_api_url": "http://localhost:8000" } }
-```
-
-### Directly via FastAPI (port 8000)
-
-```
-GET  /health
-POST /analyze-url   body: { "image_url": "..." }
+```text
+POST /action   VISION / ANALYZE
+POST /action   VISION / HEALTH
+GET  /state
 ```
